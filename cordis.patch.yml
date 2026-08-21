@@ -1,0 +1,6 @@
+# dsh-email-notify bundle patch: inserts the dual-face plugin row into the
+# web profile roster. The Host half polls the task-board state API and sends
+# SMTP mail when an execution settles; the browser half serves the settings card.
+- insert:
+    - id: email-notify
+      name: 'dsh-email-notify'

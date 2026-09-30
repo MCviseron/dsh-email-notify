@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">📧 dsh-email-notify</h1>
-  <p align="center"><b>Let DeepSeek Harness email you when a task finishes.</b></p>
+  <p align="center"><b>Let DeepSeek Harness email you when work finishes.</b></p>
   <p align="center">
     <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> email-notification plugin ·
     <a href="./README.md">简体中文</a> · English
@@ -13,21 +13,28 @@
   </p>
 </p>
 
-`dsh-email-notify` is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that watches the **task board** (`dsh-task-board`) and sends an SMTP email (QQ Mail by default; any SMTP provider works) whenever a task execution **succeeds, fails, or is cancelled**.
+`dsh-email-notify` is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin with two email triggers:
+
+1. **Task-board settlement** — watches the task board (`dsh-task-board`) and sends an SMTP email (QQ Mail by default; any SMTP provider works) whenever a task execution **succeeds, fails, or is cancelled**.
+2. **Conversation completion** — check "Email Notify" on the left side of the conversation input and the current session emails you after every completed turn.
 
 ```text
 task-board settlement → Host polls /api/task-board/state → diff against seen.json
-    → render subject/body templates → send via SMTP → Web GUI settings card
+                 → render subject/body templates → send via SMTP
+conversation turn/end → Host checks notify-sessions.json → send completion email
+                 → first-level settings page + per-session input checkbox
 ```
 
 ## ✨ Features
 
 - 🔔 **Automatic task notifications** — one email per settled execution (succeeded / failed / cancelled).
-- 🧵 **Baseline, no history spam** — the first poll only records existing executions; nothing is back-sent.
-- 💾 **Deduplicated & persisted** — notified execution IDs are stored in `~/.dsh/email-notify/seen.json`, so a Host restart never re-sends.
-- 🎛️ **Web GUI settings card** — configure everything under Settings → Plugins → Email Notify, no manual config files.
+- 💬 **Conversation completion notifications** — check "Email Notify" in the conversation input; the current session emails after every completed turn. The per-session checkbox is persisted.
+- ⏳ **Approval email reminder** — when enabled in settings, email while a request is waiting for user approval; choose Workspace approval reminder and/or Auto review escalation reminder. Off by default.
+- 🧵 **Baseline, no history spam** — the first task-board poll only records existing executions; nothing is back-sent.
+- 💾 **Deduplicated & persisted** — notified execution IDs are stored in `~/.dsh/email-notify/seen.json`, so a Host restart never re-sends; per-session checkbox state lives in `~/.dsh/email-notify/notify-sessions.json`.
+- 🎛️ **First-level settings page** — appears directly in the DSH settings sidebar as "Email Notify", not under Web UI plugins.
 - 📨 **One-click test email** — verify your SMTP settings immediately.
-- 🧩 **Template variables** — `{{taskTitle}}`, `{{resultText}}`, `{{durationText}}`, and more.
+- 🧩 **Customisable templates** — separate subject/body templates for task, conversation and approval notifications, pre-filled with the current formats.
 - 👥 **Multiple recipients** — comma, semicolon, or newline separated.
 - 🔒 **Security first** — every HTTP API is loopback-only; the SMTP authorization code is a redacted secret in the browser.
 - 🤖 **Agent announcement toggle** — plugin guidance is injected into the system prompt by default and can be disabled.
@@ -36,10 +43,10 @@ task-board settlement → Host polls /api/task-board/state → diff against seen
 
 ### Prerequisites
 
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with Web GUI
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with Web GUI — DSH `0.1.1-rc.x` / `0.1.5-rc.x` / `0.2.0-rc.x`; one build serves all three host/client seam generations
 - Node.js `^22.19.0 || >=24`
 - pnpm `10.x`
-- The task-board plugin (`dsh-task-board`) enabled
+- The task-board plugin (`dsh-task-board`) enabled only if you want task notifications; conversation notifications do not require it
 
 ### From source
 
@@ -57,7 +64,7 @@ dsh --profile web --dump-config   # confirm dsh-email-notify is in the bundle
 dsh web
 ```
 
-Refresh the Web GUI — the "Email Notify" card appears under Settings → Plugins.
+Refresh the Web GUI — the "Email Notify" page appears as a first-level entry in the settings sidebar.
 
 ### Uninstall
 
@@ -70,7 +77,7 @@ dsh plugin --profile web remove dsh-email-notify
 1. Open QQ Mail → **Settings → Account**.
 2. Enable **SMTP service** (POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV section).
 3. Generate an **authorization code** after the SMS verification — it is *not* your QQ password.
-4. In the Web GUI settings card, fill in:
+4. In the Web GUI "Settings → Email Notify" page, fill in:
 
    | Field | Value |
    | --- | --- |
@@ -87,6 +94,30 @@ dsh plugin --profile web remove dsh-email-notify
 > For port 587 + STARTTLS: set port `587` and turn **off** "Use SSL/TLS".
 > Other providers (Gmail, Outlook, 163, …) only need different SMTP host/port/credentials.
 
+## 💬 Conversation completion notifications
+
+After SMTP is configured, a "Email Notify" checkbox appears on the left side of every conversation input:
+
+- Checking it affects only the **current session**.
+- That session sends one completion email after each finished turn (`turn/end`).
+- Unchecking it stops further emails for that session.
+- Checkbox state is persisted in `~/.dsh/email-notify/notify-sessions.json` and survives Host restarts.
+
+> Conversation completion emails default to the subject `[DSH 对话完成] {{sessionId}}` and the body `DSH 会话 {{sessionId}} 已于 {{time}} 完成一轮对话。`; both are editable under Conversation subject template / Conversation body template.
+
+## ⏳ Approval email reminder
+
+Enable **"Approval email reminder"** in Settings → Email Notify (off by default) to receive an email while DSH is waiting for a user approval. The mail includes the approval prompt, tool name, call id, session and time.
+
+Two modes can be selected independently:
+
+- **Workspace approval reminder** — sandbox / workspace permission escalation requests.
+- **Auto review escalation reminder** — the official `dsh-experimental-auto-review` plugin denies a call and hands it to the user.
+
+> The Auto review escalation reminder option is only offered while the official auto review plugin is installed and live; when it is absent or disabled, only the Workspace approval reminder is available.
+
+Approval emails default to the subject `[DSH 审批提醒] {{toolName}} 等待审批`, prefer the localized UI prompt (`displayReason`), and also include the audited reason; both the subject and body are editable under Approval subject template / Approval body template.
+
 ## ⚙️ Settings
 
 | Setting | Default | Description |
@@ -95,6 +126,9 @@ dsh plugin --profile web remove dsh-email-notify
 | Announce to Agent | `true` | Inject plugin guidance into the system prompt |
 | Watch task board | `true` | Send mail when an execution settles |
 | Poll interval (ms) | `5000` | Task-board polling frequency; minimum 1000 |
+| Approval email reminder | `false` | Email while a request waits for user approval; off by default |
+| Workspace approval reminder | `true` | Send reminders for workspace/sandbox approvals when the feature is on |
+| Auto review escalation reminder | `true` | Send reminders for auto-review escalations; unavailable when the plugin is absent |
 | SMTP host | `smtp.qq.com` | Any SMTP service |
 | SMTP port | `465` | SSL for QQ Mail; STARTTLS commonly 587 |
 | Use SSL/TLS | `true` | On for 465; off for 587 + STARTTLS |
@@ -102,10 +136,18 @@ dsh plugin --profile web remove dsh-email-notify
 | Authorization code | empty | **Not your password**; no mail is sent while empty |
 | From address | empty | e.g. `Name <email>` |
 | Recipients | empty | comma / semicolon / newline separated |
-| Subject template | `[DSH 任务完成] {{taskTitle}} - {{resultText}}` | Supports template variables |
-| Body template | see default | Supports template variables |
+| Task subject template | `[DSH 任务完成] {{taskTitle}} - {{resultText}}` | Task-board notification subject |
+| Task body template | see default | Task-board notification body |
+| Conversation subject template | `[DSH 对话完成] {{sessionId}}` | Conversation completion subject |
+| Conversation body template | `DSH 会话 {{sessionId}} 已于 {{time}} 完成一轮对话。` | Conversation completion body |
+| Approval subject template | `[DSH 审批提醒] {{toolName}} 等待审批` | Approval reminder subject |
+| Approval body template | see default | Approval reminder body |
 
 ## 🧩 Template variables
+
+Task, conversation and approval notifications each have their own subject and body templates; unknown variables expand to an empty string.
+
+**Task notification variables**
 
 | Variable | Description | Example |
 | --- | --- | --- |
@@ -119,13 +161,35 @@ dsh plugin --profile web remove dsh-email-notify
 | `{{durationText}}` | Duration | `5 分钟 12 秒` |
 | `{{error}}` | Error message | `timeout` |
 
+**Conversation notification variables**
+
+| Variable | Description |
+| --- | --- |
+| `{{sessionId}}` / `{{session}}` | Session ID |
+| `{{time}}` | Completion time |
+
+**Approval notification variables**
+
+| Variable | Description |
+| --- | --- |
+| `{{modeText}}` | Localized mode name, e.g. `工作区审批提醒` |
+| `{{mode}}` | Mode id: `workspace` / `auto-review` |
+| `{{toolName}}` | Tool name |
+| `{{callId}}` | Call id (may be empty) |
+| `{{sessionId}}` / `{{session}}` | Session ID |
+| `{{time}}` | Approval request time |
+| `{{prompt}}` | Approval prompt |
+| `{{reason}}` | Audited approval reason |
+
 ## 🔧 How it works
 
 1. The Host-side `EmailNotifier` polls `/api/task-board/state` every `pollIntervalMs`.
 2. The first successful snapshot is a **baseline**: settled executions are recorded but not emailed.
 3. Later polls diff against the seen set and email newly settled executions through `nodemailer`.
 4. Seen execution IDs are persisted to `~/.dsh/email-notify/seen.json` — no duplicates after restart.
-5. The Web settings card reads/writes config through the plugin's own loopback settings bridge and calls the test-mail endpoint.
+5. The Host also listens to each session's `session/event`; on `turn/end` it emails the session when that session has the conversation-notify checkbox enabled.
+6. The Host observes the `approval/request` waterfall (delegating with `next()`): when the approval reminder is on and the matching mode is selected, it emails the approval prompt.
+7. The first-level settings page reads/writes config through the plugin's own loopback settings bridge and calls the test-mail endpoint; the input checkbox uses the `conversation-notify/describe` and `conversation-notify/set` endpoints; approval-mode availability uses `approval/availability`.
 
 ## 🔒 Security
 
@@ -162,6 +226,20 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) and [CHANGELOG.md](./CHANGELOG.md).
 - Executions settled *before* the first poll belong to the baseline and are intentionally not emailed.
 - Check Host logs for lines starting with `[dsh-email-notify]`.
 - To re-send an execution, delete `~/.dsh/email-notify/seen.json` and restart the Host (a new baseline is built).
+
+**Conversation checkbox is on but no email after a turn?**
+
+- Make sure SMTP is fully configured and "Send test email" works.
+- The checkbox is per-session: enable it again in each conversation where you want notifications.
+- Check Host logs for `[dsh-email-notify] conversation completion send failed` or `send failed`.
+- To clear all per-session checkbox state, delete `~/.dsh/email-notify/notify-sessions.json` and restart the Host.
+
+**Approval reminder email not arriving?**
+
+- Make sure "Approval email reminder" is on (off by default) and the intended mode (Workspace approval reminder / Auto review escalation reminder) is selected.
+- The Auto review escalation reminder is only selectable while the official auto review plugin is installed and live.
+- The request must actually be waiting for a user decision; the reminder never changes the approval outcome.
+- Check Host logs for `[dsh-email-notify] approval notify failed`.
 
 ## 📄 License
 

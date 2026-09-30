@@ -1,4 +1,33 @@
-import { createSnapshotStore, type SettingsScope, type SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+
+/**
+ * Snapshot of one settings namespace as this card consumes it. Declared locally
+ * instead of importing DSH's own type so one build spans generations: 0.1.x
+ * exported `SettingsScopeSnapshot` from `@deepseek-ai/dsh-client-ui-settings/client`,
+ * while 0.2 replaced that scope with `ConfigFormSnapshot` (same fields).
+ */
+export interface SettingsScopeSnapshot<T> {
+  status: 'loading' | 'ready' | 'unavailable'
+  value: T | undefined
+  base: unknown
+  user: unknown
+  revision: number | undefined
+  writable: boolean
+  mode: 'host' | 'memory'
+}
+
+/**
+ * The namespace scope this card writes through. Structural for the same reason:
+ * 0.1.x `SettingsScope` and 0.2 `ConfigForm` carry these exact members (0.2's
+ * writes additionally resolve to a boolean, which this face ignores).
+ */
+export interface SettingsScope<T> {
+  getSnapshot: () => SettingsScopeSnapshot<T>
+  subscribe: (listener: () => void) => () => void
+  mutate: (ops: readonly SettingsOp[], expectedRevision?: number) => Promise<void>
+  set: (field: string, value: unknown) => Promise<void>
+  unset: (field: string) => Promise<void>
+}
 
 interface BridgeView {
   ns: string
@@ -90,9 +119,9 @@ export function createEmailNotifySettingsScope<T>(): SettingsScope<T> {
     })
   }
 
-  const write = async (ops: SettingsOp[]): Promise<void> => {
+  const write = async (ops: SettingsOp[], expectedRevision?: number): Promise<void> => {
     if (disposed) return
-    const revision = store.getSnapshot().revision
+    const revision = expectedRevision ?? store.getSnapshot().revision
     try {
       const body = await post(API.mutate, {
         ns: 'email-notify',
@@ -122,6 +151,12 @@ export function createEmailNotifySettingsScope<T>(): SettingsScope<T> {
   return {
     getSnapshot: () => store.getSnapshot(),
     subscribe: listener => store.subscribe(listener),
+    mutate: (ops, expectedRevision) => enqueue(() => write(
+      ops.map(op => (op.op === 'set'
+        ? { op: 'set' as const, path: [...op.path], value: op.value }
+        : { op: 'unset' as const, path: [...op.path] })),
+      expectedRevision,
+    )),
     set: (field, value) => enqueue(() => write([{ op: 'set', path: [field], value }])),
     unset: field => enqueue(() => write([{ op: 'unset', path: [field] }])),
   }

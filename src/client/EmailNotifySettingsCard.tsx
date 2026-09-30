@@ -1,14 +1,21 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
-import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { EmailNotifyKey } from './locales.ts'
+import type { SettingsScope } from './settings-scope.ts'
+
+const API = {
+  approvalAvailability: '/api/dsh-email-notify/approval/availability',
+} as const
 
 export interface EmailNotifySettings {
   enabled?: boolean
   announceToAgent?: boolean
   watchTaskBoard?: boolean
   pollIntervalMs?: number
+  approvalNotifyEnabled?: boolean
+  approvalNotifyWorkspace?: boolean
+  approvalNotifyAutoReview?: boolean
   smtpHost?: string
   smtpPort?: number
   smtpSecure?: boolean
@@ -18,6 +25,10 @@ export interface EmailNotifySettings {
   mailTo?: string
   subjectTemplate?: string
   bodyTemplate?: string
+  conversationSubjectTemplate?: string
+  conversationBodyTemplate?: string
+  approvalSubjectTemplate?: string
+  approvalBodyTemplate?: string
 }
 
 export interface EmailNotifySettingsCardState {
@@ -104,16 +115,15 @@ export class EmailNotifySettingsCardController {
   }
 }
 
-export type EmailNotifySettingsCardProps =
-  PropsRuntime<'web-ui.plugin.item'>
+export type EmailNotifySettingsSectionProps =
+  PropsRuntime<'settings.section'>
   & PropsLocale<'email-notify'>
   & InjectFace<EmailNotifySettingsCardFace>
 
-const cardStyle: CSSProperties = {
-  listStyle: 'none',
-  border: '1px solid var(--dsw-alias-border-l2)',
-  background: 'var(--dsw-alias-bg-layer-3)',
-  borderRadius: 12,
+const sectionStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
   color: 'var(--dsw-alias-label-primary)',
 }
 
@@ -347,14 +357,35 @@ function TextAreaField(props: TextAreaFieldProps) {
   )
 }
 
-export function EmailNotifySettingsCard(props: EmailNotifySettingsCardProps) {
-  const { t } = props
-  const state = props.useEmailNotifySettingsCard(snapshot => snapshot)
+interface EmailNotifySettingsFormProps {
+  t: (key: EmailNotifyKey) => string
+  state: EmailNotifySettingsCardState
+  save: (draft: EmailNotifySettings) => Promise<void>
+  resetAll: () => Promise<void>
+  sendTest: () => Promise<void>
+}
+
+function EmailNotifySettingsForm(props: EmailNotifySettingsFormProps) {
+  const { t, state } = props
   const [draft, setDraft] = useState<EmailNotifySettings>({})
   const [seeded, setSeeded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | undefined>()
+  const [autoReviewAvailable, setAutoReviewAvailable] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void fetch(API.approvalAvailability, { method: 'POST' })
+      .then(async response => await response.json() as { ok?: boolean; autoReview?: boolean })
+      .then((body) => {
+        if (!cancelled) setAutoReviewAvailable(body.ok === true && body.autoReview === true)
+      })
+      .catch(() => {
+        if (!cancelled) setAutoReviewAvailable(false)
+      })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (!seeded && state.status === 'ready') {
@@ -420,14 +451,7 @@ export function EmailNotifySettingsCard(props: EmailNotifySettingsCardProps) {
   }
 
   return (
-    <li style={cardStyle}>
-      <header style={headerStyle}>
-        <div>
-          <h3 style={titleStyle}>{t('settings.title')}</h3>
-          <p style={descriptionStyle}>{t('settings.description')}</p>
-        </div>
-      </header>
-
+    <div>
       <div style={bodyStyle}>
         <BooleanField
           label={t('settings.enabled')}
@@ -456,6 +480,27 @@ export function EmailNotifySettingsCard(props: EmailNotifySettingsCardProps) {
           value={draft.pollIntervalMs}
           disabled={disabled}
           onChange={(value) => { clearNotice(); update('pollIntervalMs', value) }}
+        />
+        <BooleanField
+          label={t('settings.approvalNotifyEnabled')}
+          hint={t('settings.approvalNotifyEnabledHint')}
+          value={draft.approvalNotifyEnabled ?? false}
+          disabled={disabled}
+          onChange={(value) => { clearNotice(); update('approvalNotifyEnabled', value) }}
+        />
+        <BooleanField
+          label={t('settings.approvalNotifyWorkspace')}
+          hint={t('settings.approvalNotifyWorkspaceHint')}
+          value={draft.approvalNotifyWorkspace ?? true}
+          disabled={disabled || !(draft.approvalNotifyEnabled ?? false)}
+          onChange={(value) => { clearNotice(); update('approvalNotifyWorkspace', value) }}
+        />
+        <BooleanField
+          label={t('settings.approvalNotifyAutoReview')}
+          hint={autoReviewAvailable ? t('settings.approvalNotifyAutoReviewHint') : t('settings.approvalNotifyAutoReviewUnavailable')}
+          value={autoReviewAvailable && (draft.approvalNotifyAutoReview ?? true)}
+          disabled={disabled || !(draft.approvalNotifyEnabled ?? false) || !autoReviewAvailable}
+          onChange={(value) => { clearNotice(); update('approvalNotifyAutoReview', value) }}
         />
         <TextField
           label={t('settings.smtpHost')}
@@ -524,6 +569,34 @@ export function EmailNotifySettingsCard(props: EmailNotifySettingsCardProps) {
           disabled={disabled}
           onChange={(value) => { clearNotice(); update('bodyTemplate', value) }}
         />
+        <TextField
+          label={t('settings.conversationSubjectTemplate')}
+          hint={t('settings.conversationSubjectTemplateHint')}
+          value={draft.conversationSubjectTemplate ?? ''}
+          disabled={disabled}
+          onChange={(value) => { clearNotice(); update('conversationSubjectTemplate', value) }}
+        />
+        <TextAreaField
+          label={t('settings.conversationBodyTemplate')}
+          hint={t('settings.conversationBodyTemplateHint')}
+          value={draft.conversationBodyTemplate ?? ''}
+          disabled={disabled}
+          onChange={(value) => { clearNotice(); update('conversationBodyTemplate', value) }}
+        />
+        <TextField
+          label={t('settings.approvalSubjectTemplate')}
+          hint={t('settings.approvalSubjectTemplateHint')}
+          value={draft.approvalSubjectTemplate ?? ''}
+          disabled={disabled}
+          onChange={(value) => { clearNotice(); update('approvalSubjectTemplate', value) }}
+        />
+        <TextAreaField
+          label={t('settings.approvalBodyTemplate')}
+          hint={t('settings.approvalBodyTemplateHint')}
+          value={draft.approvalBodyTemplate ?? ''}
+          disabled={disabled}
+          onChange={(value) => { clearNotice(); update('approvalBodyTemplate', value) }}
+        />
       </div>
 
       <footer style={footerStyle}>
@@ -555,6 +628,27 @@ export function EmailNotifySettingsCard(props: EmailNotifySettingsCardProps) {
           {t(testing ? 'settings.testingMail' : 'settings.testMail')}
         </button>
       </footer>
-    </li>
+    </div>
+  )
+}
+
+export function EmailNotifySettingsSection(props: EmailNotifySettingsSectionProps) {
+  const state = props.useEmailNotifySettingsCard(snapshot => snapshot)
+  return (
+    <div style={sectionStyle}>
+      <div style={headerStyle}>
+        <div>
+          <h2 style={titleStyle}>{props.t('settings.title')}</h2>
+          <p style={descriptionStyle}>{props.t('settings.description')}</p>
+        </div>
+      </div>
+      <EmailNotifySettingsForm
+        t={props.t}
+        state={state}
+        save={props.save}
+        resetAll={props.resetAll}
+        sendTest={props.sendTest}
+      />
+    </div>
   )
 }

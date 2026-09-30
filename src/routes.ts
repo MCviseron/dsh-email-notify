@@ -1,6 +1,28 @@
 import type { ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import { SettingsConflictError, settingsNamespace, type SettingsPathOp, type SettingsProvider } from '@deepseek-ai/dsh-settings'
+import { SettingsConflictError, type SettingsPathOp } from '@deepseek-ai/dsh-settings'
+
+/**
+ * One namespace view as the settings service serializes it. Structural on
+ * purpose: 0.1.x `SettingsProvider` and 0.2 `SettingsForms` both return these
+ * fields (0.2 adds `autoGenerate`/`applies`), so one build spans generations.
+ */
+export interface SettingsBridgeView {
+  ns: unknown
+  schema?: unknown
+  value?: unknown
+  base?: unknown
+  user?: unknown
+  revision: number
+  secrets?: Array<{ path: readonly string[]; set: boolean }>
+}
+
+/** The provider face this loopback bridge uses, on every settings generation. */
+export interface SettingsBridge {
+  readonly writable?: boolean
+  describe: (options?: { redactSecrets?: boolean }) => SettingsBridgeView[]
+  mutate: (ns: string, ops: readonly SettingsPathOp[], expectedRevision?: number) => Promise<void>
+}
 import { isLoopbackRequest } from './loopback.ts'
 import type { EmailNotifier } from './notifier.ts'
 
@@ -8,6 +30,10 @@ export const EMAIL_NOTIFY_API = {
   test: '/api/dsh-email-notify/test',
   describe: '/api/dsh-email-notify/settings/describe',
   mutate: '/api/dsh-email-notify/settings/mutate',
+  conversationNotifyDescribe: '/api/dsh-email-notify/conversation-notify/describe',
+  conversationNotifySet: '/api/dsh-email-notify/conversation-notify/set',
+  approvalAvailability: '/api/dsh-email-notify/approval/availability',
+  approvalStatus: '/api/dsh-email-notify/approval/status',
 } as const
 
 const MAX_BODY_BYTES = 64 * 1024
@@ -33,7 +59,18 @@ async function readJsonBody(req: Parameters<WebRoute['handler']>[0]): Promise<un
   }
 }
 
-function toView(descriptor: ReturnType<SettingsProvider['describe']>[number]): unknown {
+/**
+ * Whether a settings write was refused as stale. Class check plus the stable
+ * machine code, because the throwing host may run a different copy of
+ * `@deepseek-ai/dsh-settings` than this plugin's own dependency — a cross-copy
+ * `instanceof` is false even when both copies are the same version.
+ */
+function isSettingsConflict(error: unknown): error is SettingsConflictError {
+  if (error instanceof SettingsConflictError) return true
+  return (error as { code?: unknown } | null)?.code === 'SETTINGS_CONFLICT'
+}
+
+function toView(descriptor: SettingsBridgeView): unknown {
   return {
     ns: String(descriptor.ns),
     schema: descriptor.schema,
@@ -45,7 +82,7 @@ function toView(descriptor: ReturnType<SettingsProvider['describe']>[number]): u
   }
 }
 
-export function makeEmailNotifyRoutes(notifier: EmailNotifier): WebRoute[] {
+export function makeEmailNotifyRoutes(notifier: EmailNotifier, isAutoReviewAvailable: () => boolean = () => false): WebRoute[] {
   const test: WebRoute = {
     kind: 'exact',
     path: EMAIL_NOTIFY_API.test,
@@ -61,11 +98,67 @@ export function makeEmailNotifyRoutes(notifier: EmailNotifier): WebRoute[] {
       }
     },
   }
-  return [test]
+
+  const approvalAvailability: WebRoute = {
+    kind: 'exact',
+    path: EMAIL_NOTIFY_API.approvalAvailability,
+    handler: async (req, res): Promise<void> => {
+      if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'method-not-allowed' })
+      if (!isLoopbackRequest(req)) return json(res, 403, { ok: false, error: 'forbidden' })
+      json(res, 200, {
+        ok: true,
+        workspace: true,
+        autoReview: isAutoReviewAvailable(),
+      })
+    },
+  }
+
+  const approvalStatus: WebRoute = {
+    kind: 'exact',
+    path: EMAIL_NOTIFY_API.approvalStatus,
+    handler: async (req, res): Promise<void> => {
+      if (req.method !== 'GET' && req.method !== 'POST') return json(res, 405, { ok: false, error: 'method-not-allowed' })
+      if (!isLoopbackRequest(req)) return json(res, 403, { ok: false, error: 'forbidden' })
+      json(res, 200, { ok: true, autoReview: isAutoReviewAvailable(), ...notifier.getApprovalStatus() })
+    },
+  }
+
+  const conversationNotifyDescribe: WebRoute = {
+    kind: 'exact',
+    path: EMAIL_NOTIFY_API.conversationNotifyDescribe,
+    handler: async (req, res): Promise<void> => {
+      if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'method-not-allowed' })
+      if (!isLoopbackRequest(req)) return json(res, 403, { ok: false, error: 'forbidden' })
+      const body = await readJsonBody(req)
+      const sessionId = typeof body === 'object' && body !== null && typeof (body as { sessionId?: unknown }).sessionId === 'string'
+        ? (body as { sessionId: string }).sessionId
+        : ''
+      if (sessionId === '') return json(res, 400, { ok: false, error: '缺少 sessionId' })
+      json(res, 200, { ok: true, enabled: notifier.isConversationNotify(sessionId) })
+    },
+  }
+
+  const conversationNotifySet: WebRoute = {
+    kind: 'exact',
+    path: EMAIL_NOTIFY_API.conversationNotifySet,
+    handler: async (req, res): Promise<void> => {
+      if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'method-not-allowed' })
+      if (!isLoopbackRequest(req)) return json(res, 403, { ok: false, error: 'forbidden' })
+      const body = await readJsonBody(req)
+      if (body === undefined || typeof body !== 'object' || body === null) return json(res, 400, { ok: false, error: 'unreadable JSON body' })
+      const { sessionId, enabled } = body as { sessionId?: unknown; enabled?: unknown }
+      if (typeof sessionId !== 'string' || sessionId === '') return json(res, 400, { ok: false, error: '缺少 sessionId' })
+      if (typeof enabled !== 'boolean') return json(res, 400, { ok: false, error: 'enabled 必须是布尔值' })
+      await notifier.setConversationNotify(sessionId, enabled)
+      json(res, 200, { ok: true, enabled })
+    },
+  }
+
+  return [test, approvalAvailability, approvalStatus, conversationNotifyDescribe, conversationNotifySet]
 }
 
-export function makeEmailNotifySettingsRoutes(settings: SettingsProvider): WebRoute[] {
-  const view = (): ReturnType<SettingsProvider['describe']>[number] | undefined => {
+export function makeEmailNotifySettingsRoutes(settings: SettingsBridge): WebRoute[] {
+  const view = (): SettingsBridgeView | undefined => {
     const descriptors = settings.describe({ redactSecrets: true })
     return descriptors.find(descriptor => String(descriptor.ns) === 'email-notify')
   }
@@ -107,9 +200,9 @@ export function makeEmailNotifySettingsRoutes(settings: SettingsProvider): WebRo
       }
       const expectedRevision = typeof record.expectedRevision === 'number' ? record.expectedRevision : undefined
       try {
-        await settings.mutate(settingsNamespace('email-notify'), ops, expectedRevision)
+        await settings.mutate('email-notify', ops, expectedRevision)
       } catch (error) {
-        if (error instanceof SettingsConflictError) {
+        if (isSettingsConflict(error)) {
           return json(res, 200, { ok: false, code: 'settings-conflict', message: error.message })
         }
         const message = error instanceof Error ? error.message : String(error)

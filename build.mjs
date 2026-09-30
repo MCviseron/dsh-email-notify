@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 
 const sharedExternal = [
   '@deepseek-ai/*',
-  'schemastery',
+  '@deepseek-ai/schemastery',
   'nodemailer',
   'react',
   'react/*',
@@ -40,10 +40,11 @@ const client = await build({
     'react',
     'react/jsx-runtime',
     'react/jsx-dev-runtime',
-    '@deepseek-ai/dsh-client-runtime/client',
+    '@deepseek-ai/cordis',
     '@deepseek-ai/dsh-client-ui-slots',
     '@deepseek-ai/dsh-client-locale/client',
     '@deepseek-ai/dsh-client-ui-settings/client',
+    '@deepseek-ai/dsh-client-ui-renderer/client',
     '@deepseek-ai/dsh-client-connection/client',
   ],
   sourcemap: false,

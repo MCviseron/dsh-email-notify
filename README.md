@@ -30,11 +30,13 @@
 - 🔔 **任务完成自动通知**：任务执行成功、失败、取消后各发一封邮件，无需人工盯看板。
 - 💬 **对话完成通知**：在对话输入框左侧勾选「邮件通知」，当前会话每完成一轮自动发信；勾选状态按会话持久化。
 - ⏳ **审批邮件提醒**：设置中开启后，等待用户审批时发送提醒邮件；可分别选择「工作区审批提醒」与「Auto review 转手动审批提醒」，默认关闭。
+- ❓ **提问邮件提醒**：设置中开启后，Agent 使用 `ask_user_question` 等待用户回答时发送提醒邮件，正文包含问题与选项；默认关闭。
 - 🧵 **基线防补发**：插件启动后的第一轮任务看板轮询只建立基线，不会补发历史已完成任务。
 - 💾 **去重持久化**：已通知的执行 ID 保存在 `~/.dsh/email-notify/seen.json`，Host 重启后不会重复发信；对话勾选状态保存在 `~/.dsh/email-notify/notify-sessions.json`。
 - 🎛️ **一级设置页**：在 DSH 设置侧边栏直接显示「邮件通知」，无需进入「Web UI 插件」子级，全部配置在页内完成。
 - 📨 **一键测试邮件**：配置完成后点一下按钮即可验证 SMTP 是否可用。
-- 🧩 **模板可自定义**：任务通知、对话通知、审批通知分别有独立的主题/正文模板，默认已填好当前格式。
+- 🏷️ **会话名称优先**：通知邮件主题与正文使用会话名称；会话 ID 作为会话属性放在正文中。
+- 🧩 **模板可自定义**：任务通知、对话通知、审批通知、提问通知分别有独立的主题/正文模板，默认已填好当前格式。
 - 👥 **多收件人**：收件人支持逗号、分号或换行分隔。
 - 🔒 **安全优先**：所有 HTTP API 仅接受 loopback 请求；授权码以 secret 声明，浏览器侧脱敏显示。
 - 🤖 **Agent 公告可关**：默认向 Agent 系统提示注入插件说明，可在设置中关闭。
@@ -111,11 +113,11 @@ dsh plugin --profile web remove dsh-email-notify
 - 取消勾选后不再发送；
 - 勾选状态持久化在 `~/.dsh/email-notify/notify-sessions.json`，Host 重启后仍然保留。
 
-> 对话完成邮件默认标题为 `[DSH 对话完成] {{sessionId}}`，默认正文为 `DSH 会话 {{sessionId}} 已于 {{time}} 完成一轮对话。`；标题与正文都可以在设置中的「对话通知主题模板 / 对话通知正文模板」里修改。
+> 对话完成邮件默认标题为 `[DSH 对话完成] {{sessionName}}`，默认正文为 `DSH 会话「{{sessionName}}」已于 {{time}} 完成一轮对话。`，并把 `{{sessionId}}` 作为「会话属性」写入正文；标题与正文都可以在设置中的「对话通知主题模板 / 对话通知正文模板」里修改。
 
 ## ⏳ 审批邮件提醒
 
-在「设置 → 邮件通知」中开启 **「审批邮件提醒」**（默认关闭）后，DSH 等待用户审批时会发送一封提醒邮件，内容包含审批提示、工具名、调用 ID、会话与时间。
+在「设置 → 邮件通知」中开启 **「审批邮件提醒」**（默认关闭）后，DSH 等待用户审批时会发送一封提醒邮件，内容包含审批提示、工具名、调用 ID、会话名称、会话 ID 与时间。
 
 可分别选择两种模式：
 
@@ -124,7 +126,18 @@ dsh plugin --profile web remove dsh-email-notify
 
 > Auto review 转手动审批提醒选项只有在官方 auto review 插件已安装并启用时才显示/可选；未安装或未启用时插件不会提供该选项，只保留工作区审批提醒。
 
-审批邮件默认标题为 `[DSH 审批提醒] {{toolName}} 等待审批`，正文优先使用界面上的本地化审批提示（`displayReason`），并附带原始审批原因；标题与正文都可以在设置中的「审批通知主题模板 / 审批通知正文模板」里修改。
+审批邮件默认标题为 `[DSH 审批提醒] {{sessionName}} 的 {{toolName}} 等待审批`，正文优先使用界面上的本地化审批提示（`displayReason`），并附带原始审批原因与会话 ID；标题与正文都可以在设置中的「审批通知主题模板 / 审批通知正文模板」里修改。
+
+## ❓ 提问邮件提醒
+
+在「设置 → 邮件通知」中开启 **「提问邮件提醒」**（默认关闭）后，Agent 使用 `ask_user_question` 等待用户回答时会发送一封提醒邮件。正文包含：
+
+- 会话名称与会话 ID；
+- 问题数量；
+- 每个问题的标题、问题正文、可选项与说明；
+- 是否可多选。
+
+默认标题为 `[DSH 提问] {{sessionName}} 需要你的回答`，正文与标题都可以在「提问通知主题模板 / 提问通知正文模板」中修改；提问提醒只观察、不回答，不会影响 Agent 等待用户的流程。
 
 ## ⚙️ 设置项
 
@@ -137,6 +150,7 @@ dsh plugin --profile web remove dsh-email-notify
 | 审批邮件提醒 | `false` | 等待用户审批时发送提醒；默认关闭 |
 | 工作区审批提醒 | `true` | 审批提醒开启后，工作区/沙箱审批是否发信 |
 | Auto review 转手动审批提醒 | `true` | 审批提醒开启后，官方 auto review 转手动审批是否发信；插件不可用时该项不可选 |
+| 提问邮件提醒 | `false` | Agent 使用 `ask_user_question` 等待回答时发送提醒；默认关闭 |
 | SMTP 服务器 | `smtp.qq.com` | 任意 SMTP 服务 |
 | SMTP 端口 | `465` | QQ 邮箱 SSL；STARTTLS 常用 587 |
 | 使用 SSL/TLS | `true` | 465 开；587 + STARTTLS 关 |
@@ -146,14 +160,16 @@ dsh plugin --profile web remove dsh-email-notify
 | 收件人 | 空 | 逗号/分号/换行分隔 |
 | 任务通知主题模板 | `[DSH 任务完成] {{taskTitle}} - {{resultText}}` | 任务看板通知主题 |
 | 任务通知正文模板 | 见默认值 | 任务看板通知正文 |
-| 对话通知主题模板 | `[DSH 对话完成] {{sessionId}}` | 对话完成通知主题 |
-| 对话通知正文模板 | `DSH 会话 {{sessionId}} 已于 {{time}} 完成一轮对话。` | 对话完成通知正文 |
-| 审批通知主题模板 | `[DSH 审批提醒] {{toolName}} 等待审批` | 审批提醒主题 |
-| 审批通知正文模板 | 见默认值 | 审批提醒正文 |
+| 对话通知主题模板 | `[DSH 对话完成] {{sessionName}}` | 对话完成通知主题 |
+| 对话通知正文模板 | 见默认值 | 对话完成通知正文，包含会话 ID 属性 |
+| 审批通知主题模板 | `[DSH 审批提醒] {{sessionName}} 的 {{toolName}} 等待审批` | 审批提醒主题 |
+| 审批通知正文模板 | 见默认值 | 审批提醒正文，包含会话 ID 属性 |
+| 提问通知主题模板 | `[DSH 提问] {{sessionName}} 需要你的回答` | 提问提醒主题 |
+| 提问通知正文模板 | 见默认值 | 提问提醒正文，包含问题与选项 |
 
 ## 🧩 模板变量
 
-任务、对话、审批三类通知都各自支持主题与正文模板；不存在的变量会被替换为空字符串。
+任务、对话、审批、提问四类通知都各自支持主题与正文模板；不存在的变量会被替换为空字符串。
 
 **任务通知变量**（任务看板）
 
@@ -173,21 +189,34 @@ dsh plugin --profile web remove dsh-email-notify
 
 | 变量 | 说明 |
 | --- | --- |
-| `{{sessionId}}` / `{{session}}` | 会话 ID |
+| `{{sessionName}}` | 会话名称（优先展示） |
+| `{{sessionId}}` / `{{session}}` | 会话 ID（会话属性） |
 | `{{time}}` | 完成时间 |
 
 **审批通知变量**
 
 | 变量 | 说明 |
 | --- | --- |
+| `{{sessionName}}` | 会话名称（优先展示） |
+| `{{sessionId}}` / `{{session}}` | 会话 ID（会话属性） |
 | `{{modeText}}` | 模式中文名，如 `工作区审批提醒` |
 | `{{mode}}` | 模式标识：`workspace` / `auto-review` |
 | `{{toolName}}` | 工具名 |
 | `{{callId}}` | 调用 ID（可能为空） |
-| `{{sessionId}}` / `{{session}}` | 会话 ID |
 | `{{time}}` | 审批请求时间 |
 | `{{prompt}}` | 审批提示内容 |
 | `{{reason}}` | 原始审批原因 |
+
+**提问通知变量**
+
+| 变量 | 说明 |
+| --- | --- |
+| `{{sessionName}}` | 会话名称（优先展示） |
+| `{{sessionId}}` / `{{session}}` | 会话 ID（会话属性） |
+| `{{count}}` | 问题数量 |
+| `{{questions}}` | 全部问题与选项的格式化文本 |
+| `{{question}}` | 第一个问题的题干 |
+| `{{time}}` | 提问时间 |
 
 ## 🔧 工作原理
 
@@ -197,7 +226,9 @@ dsh plugin --profile web remove dsh-email-notify
 4. 已通知执行 ID 写入 `~/.dsh/email-notify/seen.json`，重启不重发。
 5. Host 同时监听每个会话的 `session/event`；当事件为 `turn/end` 且该会话已勾选「邮件通知」时，发送对话完成邮件。
 6. Host 监听 `approval/request` waterfall（只观察并 `next()` 放行）：审批提醒开启且对应模式选中时，发送包含审批提示内容的提醒邮件。
-7. Web 侧一级设置页通过插件自带的 loopback 设置桥读写配置，并调用「测试邮件」接口；输入框勾选通过 `conversation-notify/describe` / `conversation-notify/set` 接口读写；审批模式可用性通过 `approval/availability` 接口读取。
+7. Host 监听 `user-questions/request` waterfall（只观察并 `next()` 放行）：提问提醒开启时，发送包含问题与选项的提醒邮件。
+8. 所有会话相关通知优先解析 `ctx.sessionTitle` 里的会话名称；会话 ID 作为会话属性写入正文。
+9. Web 侧一级设置页通过插件自带的 loopback 设置桥读写配置，并调用「测试邮件」接口；输入框勾选通过 `conversation-notify/describe` / `conversation-notify/set` 接口读写；审批模式可用性通过 `approval/availability` 接口读取；诊断信息通过 `approval/status` 读取。
 
 ```text
 ┌─────────────────┐   poll    ┌──────────────────────┐
@@ -280,6 +311,13 @@ pnpm check        # typecheck + build
 - 「Auto review 转手动审批提醒」只有在官方 auto review 插件已安装并启用时才可选。
 - 当前审批请求必须处于等待用户审批状态；审批提醒不会改变审批结果。
 - 查看 Host 日志中是否有 `[dsh-email-notify] approval notify failed`。
+
+**提问邮件提醒没有收到？**
+
+- 确认「提问邮件提醒」已开启（默认关闭）。
+- 只有 Agent 通过 `ask_user_question` 向你提问时才会触发；普通对话不会触发。
+- 提问提醒只观察、不回答，不会改变 Agent 的等待流程。
+- 查看 Host 日志中是否有 `[dsh-email-notify] ask notify failed`；也可以打开 `http://127.0.0.1:<port>/api/dsh-email-notify/approval/status` 查看 `askObserved` / `askSent` / `lastAsk`。
 - 若要清空所有会话的勾选状态，删除 `~/.dsh/email-notify/notify-sessions.json` 后重启 Host。
 
 ## 📄 License

@@ -29,6 +29,9 @@ export interface EmailNotifySettings {
   conversationBodyTemplate?: string
   approvalSubjectTemplate?: string
   approvalBodyTemplate?: string
+  askNotifyEnabled?: boolean
+  askSubjectTemplate?: string
+  askBodyTemplate?: string
 }
 
 export interface EmailNotifySettingsCardState {
@@ -596,6 +599,27 @@ function EmailNotifySettingsForm(props: EmailNotifySettingsFormProps) {
           value={draft.approvalBodyTemplate ?? ''}
           disabled={disabled}
           onChange={(value) => { clearNotice(); update('approvalBodyTemplate', value) }}
+        />
+        <BooleanField
+          label={t('settings.askNotifyEnabled')}
+          hint={t('settings.askNotifyEnabledHint')}
+          value={draft.askNotifyEnabled ?? false}
+          disabled={disabled}
+          onChange={(value) => { clearNotice(); update('askNotifyEnabled', value) }}
+        />
+        <TextField
+          label={t('settings.askSubjectTemplate')}
+          hint={t('settings.askSubjectTemplateHint')}
+          value={draft.askSubjectTemplate ?? ''}
+          disabled={disabled}
+          onChange={(value) => { clearNotice(); update('askSubjectTemplate', value) }}
+        />
+        <TextAreaField
+          label={t('settings.askBodyTemplate')}
+          hint={t('settings.askBodyTemplateHint')}
+          value={draft.askBodyTemplate ?? ''}
+          disabled={disabled}
+          onChange={(value) => { clearNotice(); update('askBodyTemplate', value) }}
         />
       </div>
 

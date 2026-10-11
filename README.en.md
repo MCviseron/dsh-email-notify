@@ -30,11 +30,13 @@ conversation turn/end → Host checks notify-sessions.json → send completion e
 - 🔔 **Automatic task notifications** — one email per settled execution (succeeded / failed / cancelled).
 - 💬 **Conversation completion notifications** — check "Email Notify" in the conversation input; the current session emails after every completed turn. The per-session checkbox is persisted.
 - ⏳ **Approval email reminder** — when enabled in settings, email while a request is waiting for user approval; choose Workspace approval reminder and/or Auto review escalation reminder. Off by default.
+- ❓ **Question email reminder** — when enabled in settings, email while the agent is waiting for an `ask_user_question` answer, including the question and its options. Off by default.
 - 🧵 **Baseline, no history spam** — the first task-board poll only records existing executions; nothing is back-sent.
 - 💾 **Deduplicated & persisted** — notified execution IDs are stored in `~/.dsh/email-notify/seen.json`, so a Host restart never re-sends; per-session checkbox state lives in `~/.dsh/email-notify/notify-sessions.json`.
 - 🎛️ **First-level settings page** — appears directly in the DSH settings sidebar as "Email Notify", not under Web UI plugins.
 - 📨 **One-click test email** — verify your SMTP settings immediately.
-- 🧩 **Customisable templates** — separate subject/body templates for task, conversation and approval notifications, pre-filled with the current formats.
+- 🏷️ **Session name first** — notification subjects and bodies use the session name; the session id is written into the body as a session property.
+- 🧩 **Customisable templates** — separate subject/body templates for task, conversation, approval and question notifications, pre-filled with the current formats.
 - 👥 **Multiple recipients** — comma, semicolon, or newline separated.
 - 🔒 **Security first** — every HTTP API is loopback-only; the SMTP authorization code is a redacted secret in the browser.
 - 🤖 **Agent announcement toggle** — plugin guidance is injected into the system prompt by default and can be disabled.
@@ -103,11 +105,11 @@ After SMTP is configured, a "Email Notify" checkbox appears on the left side of 
 - Unchecking it stops further emails for that session.
 - Checkbox state is persisted in `~/.dsh/email-notify/notify-sessions.json` and survives Host restarts.
 
-> Conversation completion emails default to the subject `[DSH 对话完成] {{sessionId}}` and the body `DSH 会话 {{sessionId}} 已于 {{time}} 完成一轮对话。`; both are editable under Conversation subject template / Conversation body template.
+> Conversation completion emails default to the subject `[DSH 对话完成] {{sessionName}}` and a body that includes the session name plus `{{sessionId}}` as a session property; both are editable under Conversation subject template / Conversation body template.
 
 ## ⏳ Approval email reminder
 
-Enable **"Approval email reminder"** in Settings → Email Notify (off by default) to receive an email while DSH is waiting for a user approval. The mail includes the approval prompt, tool name, call id, session and time.
+Enable **"Approval email reminder"** in Settings → Email Notify (off by default) to receive an email while DSH is waiting for a user approval. The mail includes the approval prompt, tool name, call id, session name, session id and time.
 
 Two modes can be selected independently:
 
@@ -116,7 +118,18 @@ Two modes can be selected independently:
 
 > The Auto review escalation reminder option is only offered while the official auto review plugin is installed and live; when it is absent or disabled, only the Workspace approval reminder is available.
 
-Approval emails default to the subject `[DSH 审批提醒] {{toolName}} 等待审批`, prefer the localized UI prompt (`displayReason`), and also include the audited reason; both the subject and body are editable under Approval subject template / Approval body template.
+Approval emails default to the subject `[DSH 审批提醒] {{sessionName}} 的 {{toolName}} 等待审批`, prefer the localized UI prompt (`displayReason`), and also include the audited reason and session id; both the subject and body are editable under Approval subject template / Approval body template.
+
+## ❓ Question email reminder
+
+Enable **"Question email reminder"** in Settings → Email Notify (off by default) to receive an email while the agent is waiting for an `ask_user_question` answer. The body includes:
+
+- session name and session id;
+- question count;
+- each question's header, text, options and descriptions;
+- whether multiple selections are allowed.
+
+The default subject is `[DSH 提问] {{sessionName}} 需要你的回答`; both subject and body are editable under Question subject template / Question body template. The reminder only observes and delegates with `next()`; it never answers or changes the agent's wait.
 
 ## ⚙️ Settings
 
@@ -129,6 +142,7 @@ Approval emails default to the subject `[DSH 审批提醒] {{toolName}} 等待�
 | Approval email reminder | `false` | Email while a request waits for user approval; off by default |
 | Workspace approval reminder | `true` | Send reminders for workspace/sandbox approvals when the feature is on |
 | Auto review escalation reminder | `true` | Send reminders for auto-review escalations; unavailable when the plugin is absent |
+| Question email reminder | `false` | Email while the agent waits for an `ask_user_question` answer; off by default |
 | SMTP host | `smtp.qq.com` | Any SMTP service |
 | SMTP port | `465` | SSL for QQ Mail; STARTTLS commonly 587 |
 | Use SSL/TLS | `true` | On for 465; off for 587 + STARTTLS |
@@ -138,14 +152,16 @@ Approval emails default to the subject `[DSH 审批提醒] {{toolName}} 等待�
 | Recipients | empty | comma / semicolon / newline separated |
 | Task subject template | `[DSH 任务完成] {{taskTitle}} - {{resultText}}` | Task-board notification subject |
 | Task body template | see default | Task-board notification body |
-| Conversation subject template | `[DSH 对话完成] {{sessionId}}` | Conversation completion subject |
-| Conversation body template | `DSH 会话 {{sessionId}} 已于 {{time}} 完成一轮对话。` | Conversation completion body |
-| Approval subject template | `[DSH 审批提醒] {{toolName}} 等待审批` | Approval reminder subject |
-| Approval body template | see default | Approval reminder body |
+| Conversation subject template | `[DSH 对话完成] {{sessionName}}` | Conversation completion subject |
+| Conversation body template | see default | Conversation completion body with session id property |
+| Approval subject template | `[DSH 审批提醒] {{sessionName}} 的 {{toolName}} 等待审批` | Approval reminder subject |
+| Approval body template | see default | Approval reminder body with session id property |
+| Question subject template | `[DSH 提问] {{sessionName}} 需要你的回答` | Question reminder subject |
+| Question body template | see default | Question reminder body with questions and options |
 
 ## 🧩 Template variables
 
-Task, conversation and approval notifications each have their own subject and body templates; unknown variables expand to an empty string.
+Task, conversation, approval and question notifications each have their own subject and body templates; unknown variables expand to an empty string.
 
 **Task notification variables**
 
@@ -165,21 +181,34 @@ Task, conversation and approval notifications each have their own subject and bo
 
 | Variable | Description |
 | --- | --- |
-| `{{sessionId}}` / `{{session}}` | Session ID |
+| `{{sessionName}}` | Session name (preferred display) |
+| `{{sessionId}}` / `{{session}}` | Session ID (session property) |
 | `{{time}}` | Completion time |
 
 **Approval notification variables**
 
 | Variable | Description |
 | --- | --- |
+| `{{sessionName}}` | Session name (preferred display) |
+| `{{sessionId}}` / `{{session}}` | Session ID (session property) |
 | `{{modeText}}` | Localized mode name, e.g. `工作区审批提醒` |
 | `{{mode}}` | Mode id: `workspace` / `auto-review` |
 | `{{toolName}}` | Tool name |
 | `{{callId}}` | Call id (may be empty) |
-| `{{sessionId}}` / `{{session}}` | Session ID |
 | `{{time}}` | Approval request time |
 | `{{prompt}}` | Approval prompt |
 | `{{reason}}` | Audited approval reason |
+
+**Question notification variables**
+
+| Variable | Description |
+| --- | --- |
+| `{{sessionName}}` | Session name (preferred display) |
+| `{{sessionId}}` / `{{session}}` | Session ID (session property) |
+| `{{count}}` | Question count |
+| `{{questions}}` | Formatted questions and options |
+| `{{question}}` | First question text |
+| `{{time}}` | Question time |
 
 ## 🔧 How it works
 
@@ -189,7 +218,9 @@ Task, conversation and approval notifications each have their own subject and bo
 4. Seen execution IDs are persisted to `~/.dsh/email-notify/seen.json` — no duplicates after restart.
 5. The Host also listens to each session's `session/event`; on `turn/end` it emails the session when that session has the conversation-notify checkbox enabled.
 6. The Host observes the `approval/request` waterfall (delegating with `next()`): when the approval reminder is on and the matching mode is selected, it emails the approval prompt.
-7. The first-level settings page reads/writes config through the plugin's own loopback settings bridge and calls the test-mail endpoint; the input checkbox uses the `conversation-notify/describe` and `conversation-notify/set` endpoints; approval-mode availability uses `approval/availability`.
+7. The Host observes the `user-questions/request` waterfall (delegating with `next()`): when the question reminder is on, it emails the questions and options.
+8. Session-related notifications resolve the live session name via `ctx.sessionTitle`; the session id is written into the body as a session property.
+9. The first-level settings page reads/writes config through the plugin's own loopback settings bridge and calls the test-mail endpoint; the input checkbox uses the `conversation-notify/describe` and `conversation-notify/set` endpoints; approval-mode availability uses `approval/availability`; diagnostics use `approval/status`.
 
 ## 🔒 Security
 
@@ -240,6 +271,13 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) and [CHANGELOG.md](./CHANGELOG.md).
 - The Auto review escalation reminder is only selectable while the official auto review plugin is installed and live.
 - The request must actually be waiting for a user decision; the reminder never changes the approval outcome.
 - Check Host logs for `[dsh-email-notify] approval notify failed`.
+
+**Question reminder email not arriving?**
+
+- Make sure "Question email reminder" is on (off by default).
+- It only fires when the agent uses `ask_user_question`; ordinary conversation turns do not trigger it.
+- The reminder observes and delegates with `next()`; it never answers or changes the wait.
+- Check Host logs for `[dsh-email-notify] ask notify failed`, or open `http://127.0.0.1:<port>/api/dsh-email-notify/approval/status` to read `askObserved` / `askSent` / `lastAsk`.
 
 ## 📄 License
 

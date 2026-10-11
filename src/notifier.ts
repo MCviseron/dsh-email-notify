@@ -4,9 +4,13 @@ import { dirname, join } from 'node:path'
 import {
   DEFAULT_APPROVAL_BODY,
   DEFAULT_APPROVAL_SUBJECT,
+  DEFAULT_ASK_BODY,
+  DEFAULT_ASK_SUBJECT,
   DEFAULT_CONVERSATION_BODY,
   DEFAULT_CONVERSATION_SUBJECT,
   type ApprovalRequestLike,
+  type AskUserQuestionItemLike,
+  type AskUserQuestionRequestLike,
   type EmailNotifyConfig,
 } from './index.ts'
 import { sendMail } from './mailer.ts'
@@ -40,6 +44,7 @@ interface TaskBoardStateLike {
 interface NotifierDeps {
   getConfig: () => EmailNotifyConfig
   origin: () => string
+  resolveSessionName?: (session: unknown) => string
   now?: () => number
   fetchImpl?: typeof fetch
   statePath?: string
@@ -53,6 +58,17 @@ interface ApprovalSummary {
   toolName: string
   sessionId: string
   callId: string
+  sent: boolean
+  error?: string
+}
+
+/** Last observed ask-user question, exposed through the diagnostics route. */
+interface AskSummary {
+  at: number
+  sessionId: string
+  sessionName: string
+  callId: string
+  count: number
   sent: boolean
   error?: string
 }
@@ -106,6 +122,9 @@ export function resolveConfig(config: EmailNotifyConfig | undefined): EmailNotif
     conversationBodyTemplate: readField<string>(source.conversationBodyTemplate),
     approvalSubjectTemplate: readField<string>(source.approvalSubjectTemplate),
     approvalBodyTemplate: readField<string>(source.approvalBodyTemplate),
+    askNotifyEnabled: readField<boolean>(source.askNotifyEnabled),
+    askSubjectTemplate: readField<string>(source.askSubjectTemplate),
+    askBodyTemplate: readField<string>(source.askBodyTemplate),
   }
 }
 
@@ -146,6 +165,25 @@ function textToHtml(value: string): string {
   return '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;font-size:14px;line-height:1.7;color:#24292f;white-space:pre-wrap">'
     + escapeHtml(value)
     + '</div>'
+}
+
+/** Render the ask-user questions and their options as numbered plain text. */
+function formatAskQuestions(questions: AskUserQuestionItemLike[]): string {
+  return questions.map((item, index) => {
+    const header = typeof item.header === 'string' && item.header !== '' ? `[${item.header}] ` : ''
+    const question = typeof item.question === 'string' && item.question !== '' ? item.question : '(未提供问题)'
+    const lines = [`${index + 1}. ${header}${question}`]
+    if (typeof item.detail === 'string' && item.detail !== '') lines.push(`   ${item.detail}`)
+    const options = Array.isArray(item.options) ? item.options : []
+    for (const option of options) {
+      const label = typeof option.label === 'string' ? option.label : ''
+      if (label === '') continue
+      const description = typeof option.description === 'string' && option.description !== '' ? `：${option.description}` : ''
+      lines.push(`   - ${label}${description}`)
+    }
+    if (item.multiSelect === true) lines.push('   （可多选）')
+    return lines.join('\n')
+  }).join('\n\n')
 }
 
 /** Whether a waterfall request came from the official experimental Auto review plugin. */
@@ -205,9 +243,14 @@ export class EmailNotifier {
   private readonly notifySessions = new Set<string>()
   private readonly approvalSeen = new WeakSet<object>()
   private readonly approvalKeys = new Set<string>()
+  private readonly askSeen = new WeakSet<object>()
+  private readonly askKeys = new Set<string>()
+  private askObserved = 0
+  private askSent = 0
   private approvalObserved = 0
   private approvalSent = 0
   private lastApproval: ApprovalSummary | undefined
+  private lastAsk: AskSummary | undefined
   private config: EmailNotifyConfig = {}
   private readonly now: () => number
   private readonly fetchImpl: typeof fetch
@@ -273,11 +316,13 @@ export class EmailNotifier {
     this.persistNotifyState()
   }
 
-  async sendConversationCompletionEmail(sessionId: string): Promise<void> {
+  async sendConversationCompletionEmail(sessionId: string, sessionName: string): Promise<void> {
     if (!(this.config.enabled ?? true)) return
+    const name = sessionName === '' ? sessionId : sessionName
     const vars = {
       sessionId,
       session: sessionId,
+      sessionName: name,
       time: formatTime(this.now()),
     }
     const body = renderTemplate(this.config.conversationBodyTemplate ?? DEFAULT_CONVERSATION_BODY, vars)
@@ -303,6 +348,7 @@ export class EmailNotifier {
     if (!this.shouldSendApproval(autoReview)) return
 
     const sessionId = String(request.agent?.session?.id ?? '')
+    const sessionName = this.sessionNameOf(request.agent?.session, sessionId)
     const toolName = typeof request.toolName === 'string' && request.toolName !== '' ? request.toolName : '未知工具'
     const callId = typeof request.callId === 'string' && request.callId !== '' ? request.callId : ''
     const prompt = approvalPromptText(request)
@@ -327,6 +373,7 @@ export class EmailNotifier {
       await this.sendApprovalEmail({
         autoReview,
         sessionId,
+        sessionName,
         toolName,
         callId,
         prompt,
@@ -347,7 +394,7 @@ export class EmailNotifier {
    * session event. It carries the audited reason but no localized display
    * reason; the waterfall path normally wins the dedupe key first.
    */
-  async notifyApprovalAsked(sessionId: string, data: unknown): Promise<void> {
+  async notifyApprovalAsked(sessionId: string, data: unknown, sessionName: string): Promise<void> {
     if (typeof data !== 'object' || data === null) return
     const record = data as { toolName?: unknown; callId?: unknown; reason?: unknown }
     const toolName = typeof record.toolName === 'string' && record.toolName !== '' ? record.toolName : '未知工具'
@@ -375,6 +422,7 @@ export class EmailNotifier {
       await this.sendApprovalEmail({
         autoReview,
         sessionId,
+        sessionName: sessionName === '' ? sessionId : sessionName,
         toolName,
         callId,
         prompt: reason === '' ? '需要用户审批' : reason,
@@ -418,6 +466,7 @@ export class EmailNotifier {
   private async sendApprovalEmail(input: {
     autoReview: boolean
     sessionId: string
+    sessionName: string
     toolName: string
     callId: string
     prompt: string
@@ -432,6 +481,7 @@ export class EmailNotifier {
       callId: input.callId,
       sessionId: input.sessionId,
       session: input.sessionId,
+      sessionName: input.sessionName === '' ? input.sessionId : input.sessionName,
       time: formatTime(this.now()),
       prompt: input.prompt,
       reason: input.reason,
@@ -443,6 +493,81 @@ export class EmailNotifier {
       text: body,
       html: textToHtml(body),
     })
+  }
+
+  private sessionNameOf(session: unknown, sessionId: string): string {
+    const resolved = this.deps.resolveSessionName?.(session)
+    return typeof resolved === 'string' && resolved.trim() !== '' ? resolved : sessionId
+  }
+
+  /**
+   * Send one reminder for a pending ask-user question. Off by default; the
+   * reminder observes the waterfall and delegates with `next()`, so it never
+   * answers or consumes the question.
+   */
+  async notifyAskRequest(request: AskUserQuestionRequestLike): Promise<void> {
+    const config = this.config
+    if (!(config.enabled ?? true)) return
+    if (!(config.askNotifyEnabled ?? false)) return
+    if (typeof request !== 'object' || request === null) return
+    if (this.askSeen.has(request)) return
+    this.askSeen.add(request)
+
+    const session = request.agent?.session
+    const sessionId = String(session?.id ?? '')
+    const sessionName = this.sessionNameOf(session, sessionId)
+    const questions = Array.isArray(request.questions) ? request.questions : []
+    const callId = typeof request.wait?.callId === 'string' ? request.wait.callId : ''
+    const key = `ask|${sessionId}|${callId}|${Math.floor(this.now() / 60_000)}`
+
+    this.askObserved += 1
+    if (this.askKeys.has(key)) return
+    this.askKeys.add(key)
+
+    const summary: AskSummary = {
+      at: this.now(),
+      sessionId,
+      sessionName,
+      callId,
+      count: questions.length,
+      sent: false,
+    }
+    this.lastAsk = summary
+    try {
+      const vars: Record<string, string> = {
+        sessionId,
+        session: sessionId,
+        sessionName,
+        time: formatTime(this.now()),
+        count: String(questions.length),
+        questions: formatAskQuestions(questions),
+        question: typeof questions[0]?.question === 'string' ? questions[0].question : '',
+      }
+      const subject = renderTemplate(config.askSubjectTemplate ?? DEFAULT_ASK_SUBJECT, vars)
+      const body = renderTemplate(config.askBodyTemplate ?? DEFAULT_ASK_BODY, vars)
+      await sendMail(config, {
+        subject,
+        text: body,
+        html: textToHtml(body),
+      })
+      summary.sent = true
+      this.askSent += 1
+    } catch (error) {
+      this.askKeys.delete(key)
+      summary.sent = false
+      summary.error = error instanceof Error ? error.message : String(error)
+      throw error
+    }
+  }
+
+  /** Ask-notification diagnostics for the settings card / manual debugging. */
+  getAskStatus(): Record<string, unknown> {
+    return {
+      askNotifyEnabled: this.config.askNotifyEnabled ?? false,
+      askObserved: this.askObserved,
+      askSent: this.askSent,
+      lastAsk: this.lastAsk ?? null,
+    }
   }
 
   private testVars(): Record<string, string> {

@@ -11,6 +11,23 @@
 - 按任务/执行 ID 的静默/重试策略。
 - 审批提醒支持自定义变量扩展。
 
+## [0.5.0] - 2026-10-11
+
+### Added
+
+- **提问邮件提醒**：设置中新增「提问邮件提醒」（默认关闭），监听 `user-questions/request` waterfall，在等待用户回答 `ask_user_question` 时发送提醒邮件；正文包含问题、选项、会话名称与时间。
+- 新增 `askNotifyEnabled`、`askSubjectTemplate`、`askBodyTemplate` 三个 volatile 字段。
+- `/api/dsh-email-notify/approval/status` 诊断接口同时返回提问提醒的观察/发送计数与最近一次摘要。
+
+### Changed
+
+- 对话完成、审批提醒、提问提醒的主题与正文模板改用 `{{sessionName}}` 突出会话名称；`{{sessionId}}` 保留为会话属性写入正文。
+- 插件公告文本同步说明提问提醒与会话名称。
+
+### Fixed
+
+- 修复通知邮件中的会话名称解析：优先读取 `ctx.sessionTitle`，不可用时回退到会话 ID。
+
 ## [0.4.0] - 2026-10-01
 
 ### Added

@@ -14,6 +14,31 @@ export interface ApprovalRequestLike {
   signal?: unknown
 }
 
+/** One selectable answer on an ask-user question. */
+export interface AskUserQuestionOptionLike {
+  label?: unknown
+  description?: unknown
+}
+
+/** One ask-user question as the user-questions seam carries it. */
+export interface AskUserQuestionItemLike {
+  id?: unknown
+  question?: unknown
+  detail?: unknown
+  header?: unknown
+  options?: AskUserQuestionOptionLike[]
+  multiSelect?: unknown
+  intent?: unknown
+}
+
+/** Minimal structural view of the user-questions/request waterfall payload. */
+export interface AskUserQuestionRequestLike {
+  questions?: AskUserQuestionItemLike[]
+  agent?: { session?: { id?: unknown } }
+  signal?: unknown
+  wait?: { callId?: unknown; timed?: unknown }
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Events {
     /**
@@ -29,6 +54,12 @@ declare module '@deepseek-ai/cordis' {
      * delegates) so it never changes the approval decision.
      */
     'approval/request'(request: ApprovalRequestLike, next: () => unknown): unknown
+
+    /**
+     * Minimal declaration of the user-questions waterfall. This plugin only
+     * observes the pending question and delegates with `next()`.
+     */
+    'user-questions/request'(request: AskUserQuestionRequestLike, next: () => unknown): unknown
   }
 }
 import { EmailNotifier, resolveConfig } from './notifier.ts'
@@ -61,22 +92,31 @@ export interface EmailNotifyConfig {
   conversationBodyTemplate?: string
   approvalSubjectTemplate?: string
   approvalBodyTemplate?: string
+  askNotifyEnabled?: boolean
+  askSubjectTemplate?: string
+  askBodyTemplate?: string
 }
 
 /** Default subject for conversation-completion notifications. */
-export const DEFAULT_CONVERSATION_SUBJECT = '[DSH 对话完成] {{sessionId}}'
+export const DEFAULT_CONVERSATION_SUBJECT = '[DSH 对话完成] {{sessionName}}'
 /** Default body for conversation-completion notifications. */
-export const DEFAULT_CONVERSATION_BODY = 'DSH 会话 {{sessionId}} 已于 {{time}} 完成一轮对话。'
+export const DEFAULT_CONVERSATION_BODY = [
+  'DSH 会话「{{sessionName}}」已于 {{time}} 完成一轮对话。',
+  '',
+  '会话属性：',
+  '- 会话 ID：{{sessionId}}',
+].join('\n')
 /** Default subject for approval reminders. */
-export const DEFAULT_APPROVAL_SUBJECT = '[DSH 审批提醒] {{toolName}} 等待审批'
+export const DEFAULT_APPROVAL_SUBJECT = '[DSH 审批提醒] {{sessionName}} 的 {{toolName}} 等待审批'
 /** Default body for approval reminders. */
 export const DEFAULT_APPROVAL_BODY = [
   'DSH 有一条操作正在等待你的审批。',
   '',
+  '会话：{{sessionName}}',
+  '会话 ID：{{sessionId}}',
   '审批类型：{{modeText}}',
   '工具：{{toolName}}',
   '调用 ID：{{callId}}',
-  '会话：{{sessionId}}',
   '时间：{{time}}',
   '',
   '审批提示：',
@@ -84,6 +124,20 @@ export const DEFAULT_APPROVAL_BODY = [
   '',
   '原始原因：',
   '{{reason}}',
+].join('\n')
+/** Default subject for ask-user-question notifications. */
+export const DEFAULT_ASK_SUBJECT = '[DSH 提问] {{sessionName}} 需要你的回答'
+/** Default body for ask-user-question notifications. */
+export const DEFAULT_ASK_BODY = [
+  'DSH 有一个问题需要你的回答。',
+  '',
+  '会话：{{sessionName}}',
+  '会话 ID：{{sessionId}}',
+  '时间：{{time}}',
+  '问题数量：{{count}}',
+  '',
+  '问题：',
+  '{{questions}}',
 ].join('\n')
 
 /**
@@ -113,9 +167,12 @@ export const Config = z.object({
   conversationBodyTemplate: z.string().default(DEFAULT_CONVERSATION_BODY).volatile(),
   approvalSubjectTemplate: z.string().default(DEFAULT_APPROVAL_SUBJECT).volatile(),
   approvalBodyTemplate: z.string().default(DEFAULT_APPROVAL_BODY).volatile(),
+  askNotifyEnabled: z.boolean().default(false).volatile(),
+  askSubjectTemplate: z.string().default(DEFAULT_ASK_SUBJECT).volatile(),
+  askBodyTemplate: z.string().default(DEFAULT_ASK_BODY).volatile(),
 })
 
-export const EMAIL_NOTIFY_GUIDANCE = '本机已安装 dsh-email-notify 插件（DSH 邮件通知）：默认监听任务看板的执行结算，任务成功、失败或取消后会通过 SMTP（默认 QQ 邮箱）发送邮件；也可以在对话输入框左侧勾选「邮件通知」，勾选后当前会话每完成一轮都会发送完成邮件；还可在设置中开启「审批邮件提醒」，等待用户审批时发送提醒邮件（可选工作区审批、官方 auto review 转手动审批两种模式，默认关闭）。配置位于 Web GUI 设置侧边栏的「邮件通知」一级设置页：SMTP 服务器/端口/安全连接、发件邮箱、QQ 邮箱授权码（不是登录密码）、收件人、主题与正文模板；可发送测试邮件。授权码留空时插件不发送任何邮件。用户提到「邮件通知 / 任务完成发邮件 / 对话完成通知 / 审批邮件提醒 / QQ 邮箱授权码 / 测试邮件」时即指本插件，请据此协作。'
+export const EMAIL_NOTIFY_GUIDANCE = '本机已安装 dsh-email-notify 插件（DSH 邮件通知）：默认监听任务看板的执行结算，任务成功、失败或取消后会通过 SMTP（默认 QQ 邮箱）发送邮件；也可以在对话输入框左侧勾选「邮件通知」，勾选后当前会话每完成一轮都会发送完成邮件；还可在设置中开启「审批邮件提醒」和「提问邮件提醒」，在等待用户审批或等待用户回答 ask_user_question 时发送提醒邮件（审批可选工作区审批、官方 auto review 转手动审批两种模式，默认关闭）。配置位于 Web GUI 设置侧边栏的「邮件通知」一级设置页：SMTP 服务器/端口/安全连接、发件邮箱、QQ 邮箱授权码（不是登录密码）、收件人、任务/对话/审批/提问四类主题与正文模板；可发送测试邮件。通知邮件优先展示会话名称，会话 ID 作为会话属性放在正文中。授权码留空时插件不发送任何邮件。用户提到「邮件通知 / 任务完成发邮件 / 对话完成通知 / 审批邮件提醒 / 提问邮件提醒 / QQ 邮箱授权码 / 测试邮件」时即指本插件，请据此协作。'
 
 /** Hooks a settings registration hands to the DSH settings seam. */
 interface SettingsSectionHooks<T> {
@@ -218,12 +275,27 @@ function isAutoReviewAvailable(ctx: Context): boolean {
   }
 }
 
+/** Resolve a live session's title, tolerating deployments without session-title. */
+function sessionNameOf(ctx: Context, session: unknown): string {
+  try {
+    const get = (ctx as unknown as { get?: (name: string) => unknown }).get
+    const service = typeof get === 'function' ? get.call(ctx, 'sessionTitle') : undefined
+    const read = (service as { get?: (value: unknown) => unknown } | undefined)?.get
+    const snapshot = typeof read === 'function' ? read.call(service, session) : undefined
+    const title = (snapshot as { title?: unknown } | undefined)?.title
+    return typeof title === 'string' ? title : ''
+  } catch {
+    return ''
+  }
+}
+
 export const inject = ['webServer', 'systemPrompt']
 
 export function apply(ctx: Context, config?: EmailNotifyConfig): void {
   const notifier = new EmailNotifier({
     getConfig: () => current(),
     origin: () => `http://127.0.0.1:${ctx.webServer.port}`,
+    resolveSessionName: (session) => sessionNameOf(ctx, session),
   })
 
   ctx.effect(() => {
@@ -235,7 +307,7 @@ export function apply(ctx: Context, config?: EmailNotifyConfig): void {
     const sessionId = String(session.id ?? '')
     if (event.type === 'turn/end') {
       if (sessionId === '' || !notifier.isConversationNotify(sessionId)) return
-      void notifier.sendConversationCompletionEmail(sessionId).catch((error) => {
+      void notifier.sendConversationCompletionEmail(sessionId, sessionNameOf(ctx, session)).catch((error) => {
         console.error('[dsh-email-notify] conversation completion send failed:', error instanceof Error ? error.message : error)
       })
       return
@@ -246,7 +318,7 @@ export function apply(ctx: Context, config?: EmailNotifyConfig): void {
       // dedupe key and send the localized prompt first.
       const data = event.data
       setTimeout(() => {
-        void notifier.notifyApprovalAsked(sessionId, data).catch((error) => {
+        void notifier.notifyApprovalAsked(sessionId, data, sessionNameOf(ctx, session)).catch((error) => {
           console.error('[dsh-email-notify] approval asked notify failed:', error instanceof Error ? error.message : error)
         })
       }, 500)
@@ -258,6 +330,14 @@ export function apply(ctx: Context, config?: EmailNotifyConfig): void {
     // the actual approval to the composed answerers.
     void notifier.notifyApprovalRequest(request).catch((error) => {
       console.error('[dsh-email-notify] approval notify failed:', error instanceof Error ? error.message : error)
+    })
+    return next()
+  })
+
+  ctx.on('user-questions/request', (request, next) => {
+    // Observe, never answer: the reminder must not consume the question.
+    void notifier.notifyAskRequest(request).catch((error) => {
+      console.error('[dsh-email-notify] ask notify failed:', error instanceof Error ? error.message : error)
     })
     return next()
   })

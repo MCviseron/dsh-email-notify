@@ -119,7 +119,7 @@ export function makeEmailNotifyRoutes(notifier: EmailNotifier, isAutoReviewAvail
     handler: async (req, res): Promise<void> => {
       if (req.method !== 'GET' && req.method !== 'POST') return json(res, 405, { ok: false, error: 'method-not-allowed' })
       if (!isLoopbackRequest(req)) return json(res, 403, { ok: false, error: 'forbidden' })
-      json(res, 200, { ok: true, autoReview: isAutoReviewAvailable(), ...notifier.getApprovalStatus() })
+      json(res, 200, { ok: true, autoReview: isAutoReviewAvailable(), ...notifier.getApprovalStatus(), ...notifier.getAskStatus() })
     },
   }
 

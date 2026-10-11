@@ -10,6 +10,7 @@ import {
   DEFAULT_CONVERSATION_SUBJECT,
   type ApprovalRequestLike,
   type AskUserQuestionItemLike,
+  type AskUserQuestionOptionLike,
   type AskUserQuestionRequestLike,
   type EmailNotifyConfig,
 } from './index.ts'
@@ -184,6 +185,41 @@ function formatAskQuestions(questions: AskUserQuestionItemLike[]): string {
     if (item.multiSelect === true) lines.push('   （可多选）')
     return lines.join('\n')
   }).join('\n\n')
+}
+
+/** Parse the JSON tool-call arguments of an `ask_user_question` call. */
+function parseAskQuestions(value: unknown): AskUserQuestionItemLike[] {
+  let payload = value
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload)
+    } catch {
+      return []
+    }
+  }
+  if (payload === null || typeof payload !== 'object') return []
+  const raw = (payload as { questions?: unknown }).questions
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item): AskUserQuestionItemLike[] => {
+    if (item === null || typeof item !== 'object') return []
+    const record = item as Record<string, unknown>
+    const options = Array.isArray(record.options)
+      ? record.options.flatMap((option): AskUserQuestionOptionLike[] => {
+        if (option === null || typeof option !== 'object') return []
+        const optionRecord = option as Record<string, unknown>
+        return [{ label: optionRecord.label, description: optionRecord.description }]
+      })
+      : undefined
+    return [{
+      id: record.id,
+      question: record.question,
+      detail: record.detail,
+      header: record.header,
+      options,
+      multiSelect: record.multiSelect ?? record.multi_select,
+      intent: record.intent,
+    }]
+  })
 }
 
 /** Whether a waterfall request came from the official experimental Auto review plugin. */
@@ -501,9 +537,10 @@ export class EmailNotifier {
   }
 
   /**
-   * Send one reminder for a pending ask-user question. Off by default; the
-   * reminder observes the waterfall and delegates with `next()`, so it never
-   * answers or consumes the question.
+   * Send one reminder for a pending ask-user question observed through the
+   * `user-questions/request` waterfall. This path is scoped to the agent on
+   * some DSH builds, so it may not fire at the root; `notifyAskToolCall` is the
+   * durable fallback and both share one dedupe key.
    */
   async notifyAskRequest(request: AskUserQuestionRequestLike): Promise<void> {
     const config = this.config
@@ -518,7 +555,34 @@ export class EmailNotifier {
     const sessionName = this.sessionNameOf(session, sessionId)
     const questions = Array.isArray(request.questions) ? request.questions : []
     const callId = typeof request.wait?.callId === 'string' ? request.wait.callId : ''
-    const key = `ask|${sessionId}|${callId}|${Math.floor(this.now() / 60_000)}`
+    await this.sendAskReminder({ sessionId, sessionName, questions, callId })
+  }
+
+  /**
+   * Durable ask-reminder path: the session log records every `tool/call`, so an
+   * `ask_user_question` call is visible even when the scoped waterfall is not
+   * delivered to the root context.
+   */
+  async notifyAskToolCall(sessionId: string, sessionName: string, data: unknown): Promise<void> {
+    const config = this.config
+    if (!(config.enabled ?? true)) return
+    if (!(config.askNotifyEnabled ?? false)) return
+    if (typeof data !== 'object' || data === null) return
+    const record = data as { callId?: unknown; arguments?: unknown }
+    const questions = parseAskQuestions(record.arguments)
+    if (questions.length === 0) return
+    const callId = typeof record.callId === 'string' ? record.callId : ''
+    await this.sendAskReminder({ sessionId, sessionName, questions, callId })
+  }
+
+  private async sendAskReminder(input: {
+    sessionId: string
+    sessionName: string
+    questions: AskUserQuestionItemLike[]
+    callId: string
+  }): Promise<void> {
+    const config = this.config
+    const key = `ask|${input.sessionId}|${input.callId}|${Math.floor(this.now() / 60_000)}`
 
     this.askObserved += 1
     if (this.askKeys.has(key)) return
@@ -526,22 +590,22 @@ export class EmailNotifier {
 
     const summary: AskSummary = {
       at: this.now(),
-      sessionId,
-      sessionName,
-      callId,
-      count: questions.length,
+      sessionId: input.sessionId,
+      sessionName: input.sessionName,
+      callId: input.callId,
+      count: input.questions.length,
       sent: false,
     }
     this.lastAsk = summary
     try {
       const vars: Record<string, string> = {
-        sessionId,
-        session: sessionId,
-        sessionName,
+        sessionId: input.sessionId,
+        session: input.sessionId,
+        sessionName: input.sessionName,
         time: formatTime(this.now()),
-        count: String(questions.length),
-        questions: formatAskQuestions(questions),
-        question: typeof questions[0]?.question === 'string' ? questions[0].question : '',
+        count: String(input.questions.length),
+        questions: formatAskQuestions(input.questions),
+        question: typeof input.questions[0]?.question === 'string' ? input.questions[0].question : '',
       }
       const subject = renderTemplate(config.askSubjectTemplate ?? DEFAULT_ASK_SUBJECT, vars)
       const body = renderTemplate(config.askBodyTemplate ?? DEFAULT_ASK_BODY, vars)

@@ -505,6 +505,13 @@ function EmailNotifySettingsForm(props: EmailNotifySettingsFormProps) {
           disabled={disabled || !(draft.approvalNotifyEnabled ?? false) || !autoReviewAvailable}
           onChange={(value) => { clearNotice(); update('approvalNotifyAutoReview', value) }}
         />
+        <BooleanField
+          label={t('settings.askNotifyEnabled')}
+          hint={t('settings.askNotifyEnabledHint')}
+          value={draft.askNotifyEnabled ?? false}
+          disabled={disabled}
+          onChange={(value) => { clearNotice(); update('askNotifyEnabled', value) }}
+        />
         <TextField
           label={t('settings.smtpHost')}
           hint={t('settings.smtpHostHint')}
@@ -599,13 +606,6 @@ function EmailNotifySettingsForm(props: EmailNotifySettingsFormProps) {
           value={draft.approvalBodyTemplate ?? ''}
           disabled={disabled}
           onChange={(value) => { clearNotice(); update('approvalBodyTemplate', value) }}
-        />
-        <BooleanField
-          label={t('settings.askNotifyEnabled')}
-          hint={t('settings.askNotifyEnabledHint')}
-          value={draft.askNotifyEnabled ?? false}
-          disabled={disabled}
-          onChange={(value) => { clearNotice(); update('askNotifyEnabled', value) }}
         />
         <TextField
           label={t('settings.askSubjectTemplate')}

@@ -312,6 +312,15 @@ export function apply(ctx: Context, config?: EmailNotifyConfig): void {
       })
       return
     }
+    if (event.type === 'tool/call') {
+      const data = event.data
+      const name = data !== null && typeof data === 'object' ? (data as { name?: unknown }).name : undefined
+      if (name !== 'ask_user_question') return
+      void notifier.notifyAskToolCall(sessionId, sessionNameOf(ctx, session), data).catch((error) => {
+        console.error('[dsh-email-notify] ask tool-call notify failed:', error instanceof Error ? error.message : error)
+      })
+      return
+    }
     if (event.type === 'approval/asked') {
       // Fallback for approval paths that do not reach the waterfall listener.
       // Delay it briefly so the richer approval/request path can win the

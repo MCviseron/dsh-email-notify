@@ -45,7 +45,7 @@
 
 ### 前置依赖
 
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（含 Web GUI 与官方桌面端），DSH `0.1.1-rc.x` / `0.1.5-rc.x` / `0.2.0-rc.x`——插件对三代客户端/宿主接缝都做了适配，装同一份构建即可
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（含 Web GUI 与官方桌面端），DSH `0.1.1-rc.x` / `0.1.5-rc.x` / `0.2.0-rc.x` / `0.2.1-rc.x`——插件对四代客户端/宿主接缝都做了适配，装同一份构建即可
 - Node.js `^22.19.0 || >=24`
 - pnpm `10.x`
 - 如需任务看板通知，需启用任务看板插件（`dsh-task-board`）；仅使用对话完成通知时不需要任务看板

@@ -45,7 +45,7 @@ conversation turn/end → Host checks notify-sessions.json → send completion e
 
 ### Prerequisites
 
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with Web GUI — DSH `0.1.1-rc.x` / `0.1.5-rc.x` / `0.2.0-rc.x`; one build serves all three host/client seam generations
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with Web GUI — DSH `0.1.1-rc.x` / `0.1.5-rc.x` / `0.2.0-rc.x` / `0.2.1-rc.x`; one build serves all four host/client seam generations
 - Node.js `^22.19.0 || >=24`
 - pnpm `10.x`
 - The task-board plugin (`dsh-task-board`) enabled only if you want task notifications; conversation notifications do not require it

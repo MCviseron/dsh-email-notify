@@ -6,7 +6,7 @@
 
 ### Changed
 
-- 设置页所有布尔勾选框改为开关（switch）控件，保留原有开/关状态文本与禁用态。
+- 设置页所有布尔勾选框改为开关（switch）控件，复用官方 Settings Switch 的 36×20 尺寸、`aria-checked` 状态、主题 token 与禁用/焦点样式。
 
 ### 计划中
 

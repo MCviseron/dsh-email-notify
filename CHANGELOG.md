@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 设置页所有布尔勾选框改为开关（switch）控件，保留原有开/关状态文本与禁用态。
+
 ### 计划中
 
 - 支持 StartTLS 的显式开关（当前通过 `smtpSecure: false` + 587 端口使用 STARTTLS）。

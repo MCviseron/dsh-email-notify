@@ -324,16 +324,45 @@ interface BooleanFieldProps {
 function BooleanField(props: BooleanFieldProps) {
   return (
     <Field label={props.label} hint={props.hint}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--dsw-alias-label-primary)', fontSize: 13, lineHeight: 1.5 }}>
-        <input
-          type="checkbox"
-          checked={props.value}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--dsw-alias-label-primary)', fontSize: 13, lineHeight: 1.5, opacity: props.disabled ? 0.55 : 1 }}>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={props.value}
+          aria-label={props.label}
           disabled={props.disabled}
-          onChange={(event) => { props.onChange(event.target.checked) }}
-          style={{ accentColor: 'var(--dsw-alias-brand-primary)' }}
-        />
-        {props.value ? '开' : '关'}
-      </label>
+          onClick={() => { props.onChange(!props.value) }}
+          style={{
+            position: 'relative',
+            boxSizing: 'border-box',
+            width: 38,
+            height: 22,
+            padding: 0,
+            border: '1px solid var(--dsw-alias-border-l2)',
+            borderRadius: 999,
+            background: props.value ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-bg-layer-3)',
+            cursor: props.disabled ? 'not-allowed' : 'pointer',
+            transition: 'background-color 150ms ease',
+            flex: '0 0 auto',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: 2,
+              left: props.value ? 18 : 2,
+              width: 16,
+              height: 16,
+              borderRadius: '50%',
+              background: 'var(--dsw-alias-label-primary)',
+              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.25)',
+              transition: 'left 150ms ease',
+            }}
+          />
+        </button>
+        <span>{props.value ? '开' : '关'}</span>
+      </div>
     </Field>
   )
 }

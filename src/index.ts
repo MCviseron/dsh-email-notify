@@ -351,16 +351,6 @@ export function apply(ctx: Context, config?: EmailNotifyConfig): void {
     return next()
   })
 
-  // The rc.6 host-apiproxy allowlist does not expose third-party settings
-  // namespaces, so this plugin serves its own loopback settings bridge to the
-  // Web GUI card. It rides ctx.settings for validation/persistence.
-  ctx.inject(['settings'], (sctx) => {
-    sctx.effect(() => {
-      const disposers = makeEmailNotifySettingsRoutes(sctx.settings as unknown as SettingsBridge).map(route => ctx.webServer.register(route))
-      return () => { for (const dispose of disposers) dispose() }
-    }, 'email-notify: settings bridge')
-  })
-
   let current: () => EmailNotifyConfig = () => config ?? {}
   let disposeSection: (() => void) | undefined
 
@@ -379,6 +369,22 @@ export function apply(ctx: Context, config?: EmailNotifyConfig): void {
       })
     }
   }
+
+  // The rc.6 host-apiproxy allowlist does not expose third-party settings
+  // namespaces, so this plugin serves its own loopback settings bridge to the
+  // Web GUI card. It rides ctx.settings for validation/persistence.
+  ctx.inject(['settings'], (sctx) => {
+    sctx.effect(() => {
+      const disposers = makeEmailNotifySettingsRoutes(
+        sctx.settings as unknown as SettingsBridge,
+        (value) => {
+          current = () => value as EmailNotifyConfig
+          sync()
+        },
+      ).map(route => ctx.webServer.register(route))
+      return () => { for (const dispose of disposers) dispose() }
+    }, 'email-notify: settings bridge')
+  })
 
   ctx.inject(['settings'], (sctx) => {
     installSettingsSection(ctx, sctx, EMAIL_NOTIFY_SETTINGS_NAMESPACE, Config, config ?? {}, {

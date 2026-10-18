@@ -8,6 +8,10 @@
 
 - 设置页所有布尔勾选框改为开关（switch）控件，复用官方 Settings Switch 的 36×20 尺寸、`aria-checked` 状态、主题 token 与禁用/焦点样式。
 
+### Fixed
+
+- 修复设置保存后必须重启 Host 才生效的问题：设置桥在 `mutate` 成功后立即用最新 resolved value 刷新 notifier 与系统提示。
+
 ### 计划中
 
 - 支持 StartTLS 的显式开关（当前通过 `smtpSecure: false` + 587 端口使用 STARTTLS）。

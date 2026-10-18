@@ -157,7 +157,7 @@ export function makeEmailNotifyRoutes(notifier: EmailNotifier, isAutoReviewAvail
   return [test, approvalAvailability, approvalStatus, conversationNotifyDescribe, conversationNotifySet]
 }
 
-export function makeEmailNotifySettingsRoutes(settings: SettingsBridge): WebRoute[] {
+export function makeEmailNotifySettingsRoutes(settings: SettingsBridge, onChanged?: (value: unknown) => void): WebRoute[] {
   const view = (): SettingsBridgeView | undefined => {
     const descriptors = settings.describe({ redactSecrets: true })
     return descriptors.find(descriptor => String(descriptor.ns) === 'email-notify')
@@ -211,6 +211,11 @@ export function makeEmailNotifySettingsRoutes(settings: SettingsBridge): WebRout
       const descriptor = view()
       if (descriptor === undefined) {
         return json(res, 200, { ok: false, code: 'internal', message: 'email-notify settings namespace was disposed' })
+      }
+      try {
+        onChanged?.(descriptor.value)
+      } catch (error) {
+        console.error('[dsh-email-notify] settings live-apply failed:', error instanceof Error ? error.message : error)
       }
       json(res, 200, { ok: true, value: toView(descriptor) })
     },

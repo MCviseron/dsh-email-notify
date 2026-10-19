@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { EmailNotifyKey } from './locales.ts'
+import { Switch, switchCss } from './Switch.tsx'
 
 const API = {
   describe: '/api/dsh-email-notify/conversation-notify/describe',
@@ -74,15 +75,18 @@ export function ConversationNotifyCheckbox(props: ConversationNotifyCheckboxProp
   }
 
   return (
-    <label style={labelStyle} title={t('conversation.notifyHint')}>
-      <input
-        type="checkbox"
-        checked={enabled}
-        disabled={loading}
-        onChange={(event) => { onChange(event.target.checked) }}
-        style={{ accentColor: 'var(--dsw-alias-brand-primary)', cursor: 'pointer' }}
-      />
-      <span>{t('conversation.notify')}</span>
-    </label>
+    <>
+      <style>{switchCss}</style>
+      <label style={labelStyle} title={t('conversation.notifyHint')}>
+        <Switch
+          checked={enabled}
+          onChange={onChange}
+          label={t('conversation.notify')}
+          disabled={loading}
+          title={t('conversation.notifyHint')}
+        />
+        <span>{t('conversation.notify')}</span>
+      </label>
+    </>
   )
 }

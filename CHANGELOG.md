@@ -6,7 +6,7 @@
 
 ### Changed
 
-- 设置页所有布尔勾选框改为开关（switch）控件，复用官方 Settings Switch 的 36×20 尺寸、`aria-checked` 状态、主题 token 与禁用/焦点样式。
+- 设置页所有布尔勾选框与对话输入框左侧「邮件通知」改为同一个官方 Settings Switch 组件（36×20、`aria-checked`、主题 token、禁用/焦点样式）。
 - **任务看板邮件退役**：停止轮询 `/api/task-board/state`，改为监听官方自动化任务（schedule）的 `user/message`、`turn/start`、`turn/end`。
 - 新增 `automationNotifyEnabled`（默认 `true`）控制自动化任务完成邮件；任务执行轮次会抑制同一会话的对话完成邮件，任务结束后用户继续对话的会话通知恢复正常。
 - 自动化任务复用任务通知模板，新增 `{{sessionName}}`、`{{scheduleId}}`、`{{occurrenceAt}}`、`{{prompt}}`、`{{taskCount}}` 变量。

@@ -6,7 +6,7 @@
 
 ### Changed
 
-- 设置页所有布尔勾选框与对话输入框左侧「邮件通知」改为同一个官方 Settings Switch 组件（36×20、`aria-checked`、主题 token、禁用/焦点样式）。
+- 设置页所有布尔控件与对话输入框左侧「邮件通知」改为同一个官方 Settings Switch 组件（36×20、`aria-checked`、主题 token、禁用/焦点样式）。
 - **任务看板邮件退役**：停止轮询 `/api/task-board/state`，改为监听官方自动化任务（schedule）的 `user/message`、`turn/start`、`turn/end`。
 - 新增 `automationNotifyEnabled`（默认 `true`）控制自动化任务完成邮件；任务执行轮次会抑制同一会话的对话完成邮件，任务结束后用户继续对话的会话通知恢复正常。
 - 自动化任务复用任务通知模板，新增 `{{sessionName}}`、`{{scheduleId}}`、`{{occurrenceAt}}`、`{{prompt}}`、`{{taskCount}}` 变量。
@@ -51,11 +51,11 @@
 
 ### Added
 
-- **对话完成通知**：在对话输入框左侧（`conversation.input.left`）新增「邮件通知」勾选，当前会话每完成一轮（`turn/end`）自动发送完成邮件。
+- **对话完成通知**：在对话输入框左侧（`conversation.input.left`）新增「邮件通知」开关，当前会话每完成一轮（`turn/end`）自动发送完成邮件。
 - **审批邮件提醒**：设置中新增「审批邮件提醒」（默认关闭），监听 `approval/request` waterfall，在等待用户审批时发送包含审批提示内容的提醒邮件；可分别开关「工作区审批提醒」和「Auto review 转手动审批提醒」两种模式。
 - 新增 `/api/dsh-email-notify/approval/availability` loopback 接口，用于向设置页暴露 auto review 插件是否可用；未安装/未启用官方 auto review 插件时不提供 Auto review 转手动审批提醒选项。
-- 新增 `/api/dsh-email-notify/conversation-notify/describe` 与 `/api/dsh-email-notify/conversation-notify/set` 两个 loopback 接口，用于读取/写入按会话的勾选状态。
-- 勾选状态持久化到 `~/.dsh/email-notify/notify-sessions.json`。
+- 新增 `/api/dsh-email-notify/conversation-notify/describe` 与 `/api/dsh-email-notify/conversation-notify/set` 两个 loopback 接口，用于读取/写入按会话的开关状态。
+- 开关状态持久化到 `~/.dsh/email-notify/notify-sessions.json`。
 - 设置页从「Web UI 插件」子级迁移到 DSH 设置侧边栏的一级 `settings.section`。
 - **通知模板独立化**：任务通知沿用原 `subjectTemplate`/`bodyTemplate`；新增对话通知与审批通知各自的主题/正文模板（`conversationSubjectTemplate`、`conversationBodyTemplate`、`approvalSubjectTemplate`、`approvalBodyTemplate`），默认值与当前格式一致。
 
@@ -63,7 +63,7 @@
 
 - `EmailNotifier.applyConfig` 仅在 `enabled && watchTaskBoard` 时启动轮询定时器；仅使用对话完成通知时不再空转任务看板轮询。
 - **修复测试邮件/模板渲染报 `source.replace is not a function`**：DSH 0.2 的 `.volatile()` Config 字段以带 `get()` 的冻结引用传入，插件现在会先展开这些引用再渲染模板、解析端口与配置。
-- 更新插件公告文本，向 Agent 说明对话勾选与一级设置页。
+- 更新插件公告文本，向 Agent 说明对话开关与一级设置页。
 - `src/client/index.ts` 增加 `conversation.input.left` 的 SlotMap 类型补丁；`src/index.ts` 增加 `session/event` 与 `approval/request` 的 Cordis Events 类型补丁，修复 `tsc --noEmit`。
 - `EmailNotifyConfig` 新增 `approvalNotifyEnabled`、`approvalNotifyWorkspace`、`approvalNotifyAutoReview` 三个 volatile 字段。
 - 审批提醒模式名称改为「工作区审批提醒」与「Auto review 转手动审批提醒」，避免与 auto review 本身的开关混淆。

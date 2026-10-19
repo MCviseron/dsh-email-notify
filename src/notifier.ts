@@ -74,6 +74,22 @@ interface AskSummary {
   error?: string
 }
 
+/** One reminder carried by a scheduled (automation) user message. */
+export interface ScheduledReminder {
+  scheduleId: string
+  occurrenceAt: string
+  prompt: string
+}
+
+/** A scheduled message waiting for the turn it will start. */
+export interface AutomationPending {
+  reminders: ScheduledReminder[]
+  messageId: string
+  arrivedAt: number
+  startedAt?: number
+  bound: boolean
+}
+
 function stateKey(taskId: unknown, executionId: unknown): string {
   return `${String(taskId)}::${String(executionId)}`
 }
@@ -106,6 +122,7 @@ export function resolveConfig(config: EmailNotifyConfig | undefined): EmailNotif
     enabled: readField<boolean>(source.enabled),
     announceToAgent: readField<boolean>(source.announceToAgent),
     watchTaskBoard: readField<boolean>(source.watchTaskBoard),
+    automationNotifyEnabled: readField<boolean>(source.automationNotifyEnabled),
     pollIntervalMs: readField<number>(source.pollIntervalMs),
     approvalNotifyEnabled: readField<boolean>(source.approvalNotifyEnabled),
     approvalNotifyWorkspace: readField<boolean>(source.approvalNotifyWorkspace),
@@ -266,6 +283,104 @@ function resultText(result: unknown): string {
   }
 }
 
+/** Parse one JSON value written after `key:` in a schedule framing line. */
+function parseScheduledLine<T>(text: string, key: string): T | undefined {
+  const match = text.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'))
+  if (match === null) return undefined
+  try {
+    return JSON.parse(match[1]) as T
+  } catch {
+    return undefined
+  }
+}
+
+/** Extract the reminders carried by one scheduled user message. */
+function parseScheduledMessage(data: unknown): ScheduledReminder[] {
+  if (data === null || typeof data !== 'object') return []
+  const record = data as { content?: unknown }
+  const content = Array.isArray(record.content) ? record.content : []
+  const text = content.map((block) => {
+    if (block === null || typeof block !== 'object') return ''
+    const item = block as { type?: unknown; text?: unknown }
+    return item.type === 'text' && typeof item.text === 'string' ? item.text : ''
+  }).filter(Boolean).join('\n')
+
+  if (text.includes('[SCHEDULE REMINDER BATCH]')) {
+    const reminders = parseScheduledLine<unknown>(text, 'reminders_json')
+    if (!Array.isArray(reminders)) return []
+    return reminders.flatMap((reminder): ScheduledReminder[] => {
+      if (reminder === null || typeof reminder !== 'object') return []
+      const item = reminder as { schedule_id?: unknown; occurrence_at?: unknown; reminder_prompt?: unknown }
+      if (typeof item.schedule_id !== 'string') return []
+      return [{
+        scheduleId: item.schedule_id,
+        occurrenceAt: typeof item.occurrence_at === 'string' ? item.occurrence_at : '',
+        prompt: typeof item.reminder_prompt === 'string' ? item.reminder_prompt : '',
+      }]
+    })
+  }
+
+  if (text.includes('[SCHEDULE REMINDER]')) {
+    const scheduleId = parseScheduledLine<unknown>(text, 'schedule_id_json')
+    const prompt = parseScheduledLine<unknown>(text, 'reminder_prompt_json')
+    if (typeof scheduleId !== 'string') return []
+    const occurrence = text.match(/^occurrence_at:\s*(.+)$/m)
+    return [{
+      scheduleId,
+      occurrenceAt: occurrence?.[1]?.trim() ?? '',
+      prompt: typeof prompt === 'string' ? prompt : '',
+    }]
+  }
+
+  return []
+}
+
+/** First non-empty line of a prompt, shortened for a subject line. */
+function firstLine(text: string): string {
+  const line = text.split(/\r?\n/).map(part => part.trim()).find(part => part !== '') ?? ''
+  return line.length > 80 ? `${line.slice(0, 77)}...` : line
+}
+
+/** The raw turn-end reason kind. */
+function turnResultKind(reason: unknown): string {
+  if (reason === null || typeof reason !== 'object') return ''
+  const kind = (reason as { kind?: unknown }).kind
+  return typeof kind === 'string' ? kind : ''
+}
+
+/** Human-readable task result for a turn end reason. */
+function turnResultText(reason: unknown): string {
+  switch (turnResultKind(reason)) {
+    case 'completed': return '成功'
+    case 'error': return '失败'
+    case 'aborted':
+    case 'interrupted': return '已取消'
+    case 'blocked': return '已阻塞'
+    case 'max-tokens': return '达到 token 上限'
+    case 'forked': return '已分叉'
+    default: return '未知'
+  }
+}
+
+/** Failure detail carried by an error turn end reason. */
+function turnFailureText(reason: unknown): string {
+  if (reason === null || typeof reason !== 'object') return ''
+  const record = reason as { kind?: unknown; error?: unknown }
+  if (record.kind !== 'error') return ''
+  const error = record.error
+  if (error !== null && typeof error === 'object') {
+    const failure = error as Record<string, unknown>
+    if (typeof failure.message === 'string') return failure.message
+    if (typeof failure.reason === 'string') return failure.reason
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return ''
+    }
+  }
+  return error === undefined ? '' : String(error)
+}
+
 /**
  * Polls the task-board Host API and sends one email per newly settled
  * execution. Seen execution ids are persisted under $DSH_HOME/email-notify,
@@ -281,6 +396,7 @@ export class EmailNotifier {
   private readonly approvalKeys = new Set<string>()
   private readonly askSeen = new WeakSet<object>()
   private readonly askKeys = new Set<string>()
+  private readonly automationPending = new Map<string, AutomationPending[]>()
   private askObserved = 0
   private askSent = 0
   private approvalObserved = 0
@@ -305,11 +421,9 @@ export class EmailNotifier {
   applyConfig(config: EmailNotifyConfig): void {
     const plain = resolveConfig(config)
     this.config = plain
-    if ((plain.enabled ?? true) && (plain.watchTaskBoard ?? true)) {
-      this.start()
-    } else {
-      this.stop()
-    }
+    // The task-board poller is retired; official scheduled/automation tasks
+    // arrive through session events, so no timer is ever started here.
+    this.stop()
   }
 
   start(): void {
@@ -364,6 +478,90 @@ export class EmailNotifier {
     const body = renderTemplate(this.config.conversationBodyTemplate ?? DEFAULT_CONVERSATION_BODY, vars)
     await sendMail(this.config, {
       subject: renderTemplate(this.config.conversationSubjectTemplate ?? DEFAULT_CONVERSATION_SUBJECT, vars),
+      text: body,
+      html: textToHtml(body),
+    })
+  }
+
+  /** Record one scheduled (automation) user message until its turn ends. */
+  noteAutomationMessage(sessionId: string, data: unknown): void {
+    const reminders = parseScheduledMessage(data)
+    if (reminders.length === 0) return
+    const record = data as { id?: unknown }
+    const messageId = typeof record.id === 'string' ? record.id : ''
+    const queue = this.automationPending.get(sessionId) ?? []
+    queue.push({
+      reminders,
+      messageId,
+      arrivedAt: this.now(),
+      bound: false,
+    })
+    this.automationPending.set(sessionId, queue)
+  }
+
+  /** Bind the next unbound scheduled message to the turn that just started. */
+  markAutomationTurnStart(sessionId: string): void {
+    const queue = this.automationPending.get(sessionId)
+    const pending = queue?.find(item => !item.bound)
+    if (pending === undefined) return
+    pending.bound = true
+    pending.startedAt = this.now()
+  }
+
+  /**
+   * Remove and return the scheduled message owned by the ending turn. Returns
+   * undefined when the turn was not started by an automation message, when the
+   * plugin is disabled, or when automation notifications are off; in those
+   * cases the caller keeps the normal conversation-completion behavior.
+   */
+  consumeAutomationTurn(sessionId: string): AutomationPending | undefined {
+    const queue = this.automationPending.get(sessionId)
+    if (queue === undefined) return undefined
+    const index = queue.findIndex(item => item.bound)
+    if (index === -1) return undefined
+    const [pending] = queue.splice(index, 1)
+    if (queue.length === 0) this.automationPending.delete(sessionId)
+    if (!(this.config.enabled ?? true)) return undefined
+    if (!(this.config.automationNotifyEnabled ?? true)) return undefined
+    return pending
+  }
+
+  /** Send the task-completion email for one finished automation turn. */
+  async sendAutomationEmail(
+    sessionId: string,
+    sessionName: string,
+    pending: AutomationPending,
+    reason: unknown,
+  ): Promise<void> {
+    if (!(this.config.enabled ?? true)) return
+    const now = this.now()
+    const first = pending.reminders[0]
+    const baseTitle = firstLine(first?.prompt ?? '') || '自动化任务'
+    const title = pending.reminders.length > 1
+      ? `${baseTitle} 等 ${pending.reminders.length} 个任务`
+      : baseTitle
+    const durationMs = pending.startedAt === undefined ? undefined : now - pending.startedAt
+    const vars: Record<string, string> = {
+      taskTitle: title,
+      result: turnResultKind(reason),
+      resultText: turnResultText(reason),
+      taskId: pending.reminders.map(reminder => reminder.scheduleId).join(', '),
+      executionId: pending.messageId,
+      startedAt: formatTime(pending.startedAt),
+      endedAt: formatTime(now),
+      durationText: durationMs === undefined ? '' : formatDuration(durationMs),
+      error: turnFailureText(reason),
+      sessionName: sessionName === '' ? sessionId : sessionName,
+      sessionId,
+      session: sessionId,
+      prompt: first?.prompt ?? '',
+      scheduleId: first?.scheduleId ?? '',
+      occurrenceAt: first?.occurrenceAt ?? '',
+      taskCount: String(pending.reminders.length),
+    }
+    const body = renderTemplate(this.config.bodyTemplate, vars)
+    await sendMail(this.config, {
+      subject: renderTemplate(this.config.subjectTemplate, vars),
       text: body,
       html: textToHtml(body),
     })

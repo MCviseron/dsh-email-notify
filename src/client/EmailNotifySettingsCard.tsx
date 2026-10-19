@@ -12,6 +12,7 @@ export interface EmailNotifySettings {
   enabled?: boolean
   announceToAgent?: boolean
   watchTaskBoard?: boolean
+  automationNotifyEnabled?: boolean
   pollIntervalMs?: number
   approvalNotifyEnabled?: boolean
   approvalNotifyWorkspace?: boolean
@@ -514,18 +515,11 @@ function EmailNotifySettingsForm(props: EmailNotifySettingsFormProps) {
           onChange={(value) => { clearNotice(); update('announceToAgent', value) }}
         />
         <BooleanField
-          label={t('settings.watchTaskBoard')}
-          hint={t('settings.watchTaskBoardHint')}
-          value={draft.watchTaskBoard ?? true}
+          label={t('settings.automationNotifyEnabled')}
+          hint={t('settings.automationNotifyEnabledHint')}
+          value={draft.automationNotifyEnabled ?? true}
           disabled={disabled}
-          onChange={(value) => { clearNotice(); update('watchTaskBoard', value) }}
-        />
-        <NumberField
-          label={t('settings.pollIntervalMs')}
-          hint={t('settings.pollIntervalMsHint')}
-          value={draft.pollIntervalMs}
-          disabled={disabled}
-          onChange={(value) => { clearNotice(); update('pollIntervalMs', value) }}
+          onChange={(value) => { clearNotice(); update('automationNotifyEnabled', value) }}
         />
         <BooleanField
           label={t('settings.approvalNotifyEnabled')}

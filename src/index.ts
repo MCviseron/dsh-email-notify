@@ -75,6 +75,7 @@ export interface EmailNotifyConfig {
   enabled?: boolean
   announceToAgent?: boolean
   watchTaskBoard?: boolean
+  automationNotifyEnabled?: boolean
   pollIntervalMs?: number
   approvalNotifyEnabled?: boolean
   approvalNotifyWorkspace?: boolean
@@ -149,7 +150,8 @@ export const DEFAULT_ASK_BODY = [
 export const Config = z.object({
   enabled: z.boolean().default(true).volatile(),
   announceToAgent: z.boolean().default(true).volatile(),
-  watchTaskBoard: z.boolean().default(true).volatile(),
+  watchTaskBoard: z.boolean().default(false).volatile(),
+  automationNotifyEnabled: z.boolean().default(true).volatile(),
   pollIntervalMs: z.number().min(1000).default(5000).volatile(),
   approvalNotifyEnabled: z.boolean().default(false).volatile(),
   approvalNotifyWorkspace: z.boolean().default(true).volatile(),
@@ -172,7 +174,7 @@ export const Config = z.object({
   askBodyTemplate: z.string().default(DEFAULT_ASK_BODY).volatile(),
 })
 
-export const EMAIL_NOTIFY_GUIDANCE = '本机已安装 dsh-email-notify 插件（DSH 邮件通知）：默认监听任务看板的执行结算，任务成功、失败或取消后会通过 SMTP（默认 QQ 邮箱）发送邮件；也可以在对话输入框左侧勾选「邮件通知」，勾选后当前会话每完成一轮都会发送完成邮件；还可在设置中开启「审批邮件提醒」和「提问邮件提醒」，在等待用户审批或等待用户回答 ask_user_question 时发送提醒邮件（审批可选工作区审批、官方 auto review 转手动审批两种模式，默认关闭）。配置位于 Web GUI 设置侧边栏的「邮件通知」一级设置页：SMTP 服务器/端口/安全连接、发件邮箱、QQ 邮箱授权码（不是登录密码）、收件人、任务/对话/审批/提问四类主题与正文模板；可发送测试邮件。通知邮件优先展示会话名称，会话 ID 作为会话属性放在正文中。授权码留空时插件不发送任何邮件。用户提到「邮件通知 / 任务完成发邮件 / 对话完成通知 / 审批邮件提醒 / 提问邮件提醒 / QQ 邮箱授权码 / 测试邮件」时即指本插件，请据此协作。'
+export const EMAIL_NOTIFY_GUIDANCE = '本机已安装 dsh-email-notify 插件（DSH 邮件通知）：默认监听官方自动化任务（schedule）；自动化任务每轮结束时会通过 SMTP（默认 QQ 邮箱）发送任务完成邮件，并在该轮抑制同一会话的对话完成邮件，避免重复；任务看板轮询已停用；也可以在对话输入框左侧勾选「邮件通知」，勾选后当前会话每完成一轮都会发送完成邮件；还可在设置中开启「审批邮件提醒」和「提问邮件提醒」，在等待用户审批或等待用户回答 ask_user_question 时发送提醒邮件（审批可选工作区审批、官方 auto review 转手动审批两种模式，默认关闭）。配置位于 Web GUI 设置侧边栏的「邮件通知」一级设置页：SMTP 服务器/端口/安全连接、发件邮箱、QQ 邮箱授权码（不是登录密码）、收件人、任务/对话/审批/提问四类主题与正文模板；可发送测试邮件。通知邮件优先展示会话名称，会话 ID 作为会话属性放在正文中。授权码留空时插件不发送任何邮件。用户提到「邮件通知 / 任务完成发邮件 / 对话完成通知 / 审批邮件提醒 / 提问邮件提醒 / QQ 邮箱授权码 / 测试邮件」时即指本插件，请据此协作。'
 
 /** Hooks a settings registration hands to the DSH settings seam. */
 interface SettingsSectionHooks<T> {
@@ -305,7 +307,29 @@ export function apply(ctx: Context, config?: EmailNotifyConfig): void {
 
   ctx.on('session/event', (session, event) => {
     const sessionId = String(session.id ?? '')
+    if (event.type === 'user/message') {
+      const data = event.data
+      const source = data !== null && typeof data === 'object'
+        ? (data as { source?: { kind?: unknown } }).source
+        : undefined
+      if (source?.kind === 'schedule') notifier.noteAutomationMessage(sessionId, data)
+      return
+    }
+    if (event.type === 'turn/start') {
+      notifier.markAutomationTurnStart(sessionId)
+      return
+    }
     if (event.type === 'turn/end') {
+      const pending = notifier.consumeAutomationTurn(sessionId)
+      if (pending !== undefined) {
+        const reason = event.data !== null && typeof event.data === 'object'
+          ? (event.data as { reason?: unknown }).reason
+          : undefined
+        void notifier.sendAutomationEmail(sessionId, sessionNameOf(ctx, session), pending, reason).catch((error) => {
+          console.error('[dsh-email-notify] automation completion send failed:', error instanceof Error ? error.message : error)
+        })
+        return
+      }
       if (sessionId === '' || !notifier.isConversationNotify(sessionId)) return
       void notifier.sendConversationCompletionEmail(sessionId, sessionNameOf(ctx, session)).catch((error) => {
         console.error('[dsh-email-notify] conversation completion send failed:', error instanceof Error ? error.message : error)

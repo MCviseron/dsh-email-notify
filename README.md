@@ -13,26 +13,26 @@
   </p>
 </p>
 
-`dsh-email-notify` 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的邮件通知插件，支持两种触发方式：
+`dsh-email-notify` 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的邮件通知插件，支持以下触发方式：
 
-1. **任务看板结算**：监听任务看板（`dsh-task-board`），当任务**成功、失败或取消**时，通过 SMTP（默认 QQ 邮箱，也支持任意 SMTP 服务）自动发送邮件。
+1. **官方自动化任务完成**：监听 schedule 注入的 `user/message`，在任务轮次结束（`turn/end`）后发送任务完成邮件。
 2. **对话完成通知**：在对话输入框左侧勾选「邮件通知」后，当前会话每完成一轮都会发送一封完成邮件。
+3. **审批/提问提醒**：等待用户审批或回答 `ask_user_question` 时发送提醒邮件。
 
 ```text
-任务看板结算 → Host 轮询 /api/task-board/state → 与 seen.json 比对
-                 → 渲染主题/正文模板 → SMTP 发送邮件
-对话 turn/end  → Host 检查 notify-sessions.json → SMTP 发送完成邮件
-                 → 浏览器侧一级设置页 + 输入框勾选
+自动化任务 user/message → 标记任务轮次 → turn/end → 发送任务完成邮件
+                                   └→ 同轮抑制会话完成邮件
+用户普通 turn/end → 检查 notify-sessions.json → SMTP 发送完成邮件
 ```
 
 ## ✨ 特性
 
-- 🔔 **任务完成自动通知**：任务执行成功、失败、取消后各发一封邮件，无需人工盯看板。
+- 🔔 **自动化任务完成通知**：官方定时/自动化任务结束后发送任务完成邮件。
 - 💬 **对话完成通知**：在对话输入框左侧勾选「邮件通知」，当前会话每完成一轮自动发信；勾选状态按会话持久化。
 - ⏳ **审批邮件提醒**：设置中开启后，等待用户审批时发送提醒邮件；可分别选择「工作区审批提醒」与「Auto review 转手动审批提醒」，默认关闭。
 - ❓ **提问邮件提醒**：设置中开启后，Agent 使用 `ask_user_question` 等待用户回答时发送提醒邮件，正文包含问题与选项；默认关闭。
-- 🧵 **基线防补发**：插件启动后的第一轮任务看板轮询只建立基线，不会补发历史已完成任务。
-- 💾 **去重持久化**：已通知的执行 ID 保存在 `~/.dsh/email-notify/seen.json`，Host 重启后不会重复发信；对话勾选状态保存在 `~/.dsh/email-notify/notify-sessions.json`。
+- 🚫 **任务轮次去重**：自动化任务执行的那一轮不会再发会话完成邮件；任务结束后用户继续对话，会话通知恢复正常。
+- 💾 **勾选状态持久化**：对话勾选状态保存在 `~/.dsh/email-notify/notify-sessions.json`。
 - 🎛️ **一级设置页**：在 DSH 设置侧边栏直接显示「邮件通知」，无需进入「Web UI 插件」子级，全部配置在页内完成。
 - 📨 **一键测试邮件**：配置完成后点一下按钮即可验证 SMTP 是否可用。
 - 🏷️ **会话名称优先**：通知邮件主题与正文使用会话名称；会话 ID 作为会话属性放在正文中。
@@ -48,7 +48,7 @@
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（含 Web GUI 与官方桌面端），DSH `0.1.1-rc.x` / `0.1.5-rc.x` / `0.2.0-rc.x` / `0.2.1-rc.x`——插件对四代客户端/宿主接缝都做了适配，装同一份构建即可
 - Node.js `^22.19.0 || >=24`
 - pnpm `10.x`
-- 如需任务看板通知，需启用任务看板插件（`dsh-task-board`）；仅使用对话完成通知时不需要任务看板
+- 自动化任务通知依赖 DSH 官方 schedule（`0.2.1-rc.x` 默认包含）；任务看板轮询已停用
 
 ### 从源码安装
 
@@ -143,10 +143,9 @@ dsh plugin --profile web remove dsh-email-notify
 
 | 设置 | 默认值 | 说明 |
 | --- | --- | --- |
-| 启用插件 | `true` | 关闭后不轮询、不发信 |
+| 启用插件 | `true` | 关闭后不发信 |
 | 向 Agent 公告本插件 | `true` | 在系统提示中注入插件能力说明 |
-| 监听任务看板 | `true` | 任务执行结算后发信 |
-| 轮询间隔（毫秒） | `5000` | 检查任务看板状态的频率，最小 1000 |
+| 自动化任务通知 | `true` | 官方定时/自动化任务结束后发信；该轮抑制会话完成邮件 |
 | 审批邮件提醒 | `false` | 等待用户审批时发送提醒；默认关闭 |
 | 工作区审批提醒 | `true` | 审批提醒开启后，工作区/沙箱审批是否发信 |
 | Auto review 转手动审批提醒 | `true` | 审批提醒开启后，官方 auto review 转手动审批是否发信；插件不可用时该项不可选 |
@@ -158,8 +157,8 @@ dsh plugin --profile web remove dsh-email-notify
 | 邮箱授权码 | 空 | **不是登录密码**；留空时不发送任何邮件 |
 | 发件人地址 | 空 | 可写作 `名称 <邮箱>` |
 | 收件人 | 空 | 逗号/分号/换行分隔 |
-| 任务通知主题模板 | `[DSH 任务完成] {{taskTitle}} - {{resultText}}` | 任务看板通知主题 |
-| 任务通知正文模板 | 见默认值 | 任务看板通知正文 |
+| 任务通知主题模板 | `[DSH 任务完成] {{taskTitle}} - {{resultText}}` | 自动化任务通知主题 |
+| 任务通知正文模板 | 见默认值 | 自动化任务通知正文 |
 | 对话通知主题模板 | `[DSH 对话完成] {{sessionName}}` | 对话完成通知主题 |
 | 对话通知正文模板 | 见默认值 | 对话完成通知正文，包含会话 ID 属性 |
 | 审批通知主题模板 | `[DSH 审批提醒] {{sessionName}} 的 {{toolName}} 等待审批` | 审批提醒主题 |
@@ -171,19 +170,25 @@ dsh plugin --profile web remove dsh-email-notify
 
 任务、对话、审批、提问四类通知都各自支持主题与正文模板；不存在的变量会被替换为空字符串。
 
-**任务通知变量**（任务看板）
+**任务通知变量**（自动化任务）
 
 | 变量 | 说明 | 示例 |
 | --- | --- | --- |
-| `{{taskTitle}}` | 任务标题 | `清理临时文件` |
-| `{{result}}` | 原始结果标识 | `succeeded` / `failed` / `cancelled` |
+| `{{taskTitle}}` | 任务标题（提醒 prompt 第一行） | `每周巡检` |
+| `{{result}}` | turn 结束原因 | `completed` / `error` / `aborted` |
 | `{{resultText}}` | 结果中文文案 | `成功` / `失败` / `已取消` |
-| `{{taskId}}` | 任务 ID | `task-123` |
-| `{{executionId}}` | 执行 ID | `exec-456` |
-| `{{startedAt}}` | 开始时间（本地时区） | `2026/8/22 14:30:00` |
-| `{{endedAt}}` | 结束时间（本地时区） | `2026/8/22 14:35:12` |
+| `{{taskId}}` | schedule ID | `schedule-...` |
+| `{{executionId}}` | 触发消息 ID | `1f31...` |
+| `{{startedAt}}` | turn 开始时间 | `2026/10/18 09:00:00` |
+| `{{endedAt}}` | turn 结束时间 | `2026/10/18 09:05:12` |
 | `{{durationText}}` | 耗时 | `5 分钟 12 秒` |
-| `{{error}}` | 错误信息 | `timeout` |
+| `{{error}}` | 失败详情 | `timeout` |
+| `{{sessionName}}` | 会话名称 | `发送邮箱通知dsh插件` |
+| `{{sessionId}}` / `{{session}}` | 会话 ID | `session-...` |
+| `{{scheduleId}}` | 首个 schedule ID | `schedule-...` |
+| `{{occurrenceAt}}` | 计划触发时间 | `2026-10-18T01:00:00.000Z` |
+| `{{prompt}}` | 首个提醒 prompt | `每周巡检...` |
+| `{{taskCount}}` | 本批任务数 | `1` |
 
 **对话通知变量**
 
@@ -220,25 +225,18 @@ dsh plugin --profile web remove dsh-email-notify
 
 ## 🔧 工作原理
 
-1. Host 侧 `EmailNotifier` 按 `pollIntervalMs` 轮询任务看板 Host API（`/api/task-board/state`）。
-2. 第一轮成功拉取只作为**基线**：把已结束的执行记录进 seen 集合，不发送邮件。
-3. 之后的轮询中，新出现的已结束执行（成功/失败/取消）会渲染主题与正文模板，通过 `nodemailer` 发送。
-4. 已通知执行 ID 写入 `~/.dsh/email-notify/seen.json`，重启不重发。
-5. Host 同时监听每个会话的 `session/event`；当事件为 `turn/end` 且该会话已勾选「邮件通知」时，发送对话完成邮件。
-6. Host 监听 `approval/request` waterfall（只观察并 `next()` 放行）：审批提醒开启且对应模式选中时，发送包含审批提示内容的提醒邮件。
-7. Host 监听 `user-questions/request` waterfall（只观察并 `next()` 放行）：提问提醒开启时，发送包含问题与选项的提醒邮件。
-8. 所有会话相关通知优先解析 `ctx.sessionTitle` 里的会话名称；会话 ID 作为会话属性写入正文。
-9. Web 侧一级设置页通过插件自带的 loopback 设置桥读写配置，并调用「测试邮件」接口；输入框勾选通过 `conversation-notify/describe` / `conversation-notify/set` 接口读写；审批模式可用性通过 `approval/availability` 接口读取；诊断信息通过 `approval/status` 读取。
+1. Host 监听每个会话的 `session/event`。
+2. 收到 `user/message` 且 `source.kind === 'schedule'` 时，解析 `[SCHEDULE REMINDER]` / `[SCHEDULE REMINDER BATCH]`，记录该会话的待执行自动化任务。
+3. 下一次 `turn/start` 将该任务绑定到当前轮次；`turn/end` 时发送任务完成邮件，并跳过同一轮的对话完成邮件。
+4. 普通用户消息的 `turn/end` 仍按会话勾选状态发送对话完成邮件；任务结束后的后续对话不受影响。
+5. Host 监听 `approval/request` waterfall（只观察并 `next()` 放行）：审批提醒开启且对应模式选中时，发送包含审批提示内容的提醒邮件。
+6. Host 监听 `user-questions/request` waterfall（只观察并 `next()` 放行）：提问提醒开启时，发送包含问题与选项的提醒邮件。
+7. 所有会话相关通知优先解析 `ctx.sessionTitle` 里的会话名称；会话 ID 作为会话属性写入正文。
+8. Web 侧一级设置页通过插件自带的 loopback 设置桥读写配置，并调用「测试邮件」接口；输入框勾选通过 `conversation-notify/describe` / `conversation-notify/set` 接口读写；审批模式可用性通过 `approval/availability` 接口读取；诊断信息通过 `approval/status` 读取。
 
 ```text
-┌─────────────────┐   poll    ┌──────────────────────┐
-│  dsh-task-board │ ◀───────  │  EmailNotifier (Host) │
-└─────────────────┘           └──────────┬───────────┘
-                                         │ diff + 渲染模板
-                                         ▼
-                               ┌──────────────────────┐
-                               │  SMTP (nodemailer)    │
-                               └──────────────────────┘
+自动化任务 user/message → 标记任务轮次 → turn/end → 任务完成邮件
+用户普通 turn/end → 检查 notify-sessions.json → 会话完成邮件
 ```
 
 ## 🔒 安全说明
@@ -254,7 +252,7 @@ dsh plugin --profile web remove dsh-email-notify
 dsh-email-notify/
 ├── src/
 │   ├── index.ts                  # 插件入口：配置、系统提示、路由注册
-│   ├── notifier.ts               # 轮询任务看板、去重、模板渲染、发信
+│   ├── notifier.ts               # 自动化任务轮次、模板渲染、发信
 │   ├── mailer.ts                 # nodemailer 封装、收件人解析、配置校验
 │   ├── routes.ts                 # 测试邮件 / 设置桥接 HTTP API
 │   ├── loopback.ts               # loopback 请求校验
@@ -292,12 +290,12 @@ pnpm check        # typecheck + build
 - 确认「发件人地址」非空，格式可为 `name@example.com` 或 `名称 <name@example.com>`。
 - 检查网络/防火墙是否能访问 SMTP 服务器（QQ 邮箱一般无需代理）。
 
-**任务完成了但没收到邮件？**
+**自动化任务完成了但没收到邮件？**
 
-- 确认「监听任务看板」已开启，且任务看板插件本身已启用。
-- 确认插件是在任务结算**之后**才开始轮询的；启动前的历史任务属于基线，不会补发（这是设计行为）。
-- 查看 Host 日志中是否有 `[dsh-email-notify]` 开头的错误。
-- 如果想重新发送某次执行，可删除 `~/.dsh/email-notify/seen.json` 后重启 Host（会重新建立基线）。
+- 确认「自动化任务通知」已开启。
+- 自动化任务必须由官方 schedule 注入；普通定时提醒也会走同一路径。
+- 查看 Host 日志中是否有 `[dsh-email-notify] automation completion send failed`。
+- 诊断接口：`http://127.0.0.1:<port>/api/dsh-email-notify/approval/status`。
 
 **勾选了「邮件通知」但对话完成后没收到邮件？**
 

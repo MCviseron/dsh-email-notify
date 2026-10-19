@@ -22,17 +22,17 @@
 task-board settlement → Host polls /api/task-board/state → diff against seen.json
                  → render subject/body templates → send via SMTP
 conversation turn/end → Host checks notify-sessions.json → send completion email
-                 → first-level settings page + per-session input checkbox
+                 → first-level settings page + per-session input switch
 ```
 
 ## ✨ Features
 
 - 🔔 **Automatic task notifications** — one email per settled execution (succeeded / failed / cancelled).
-- 💬 **Conversation completion notifications** — check "Email Notify" in the conversation input; the current session emails after every completed turn. The per-session checkbox is persisted.
+- 💬 **Conversation completion notifications** — enable the "Email Notify" switch in the conversation input; the current session emails after every completed turn. The per-session switch state is persisted.
 - ⏳ **Approval email reminder** — when enabled in settings, email while a request is waiting for user approval; choose Workspace approval reminder and/or Auto review escalation reminder. Off by default.
 - ❓ **Question email reminder** — when enabled in settings, email while the agent is waiting for an `ask_user_question` answer, including the question and its options. Off by default.
 - 🧵 **Baseline, no history spam** — the first task-board poll only records existing executions; nothing is back-sent.
-- 💾 **Deduplicated & persisted** — notified execution IDs are stored in `~/.dsh/email-notify/seen.json`, so a Host restart never re-sends; per-session checkbox state lives in `~/.dsh/email-notify/notify-sessions.json`.
+- 💾 **Deduplicated & persisted** — notified execution IDs are stored in `~/.dsh/email-notify/seen.json`, so a Host restart never re-sends; per-session switch state lives in `~/.dsh/email-notify/notify-sessions.json`.
 - 🎛️ **First-level settings page** — appears directly in the DSH settings sidebar as "Email Notify", not under Web UI plugins.
 - 📨 **One-click test email** — verify your SMTP settings immediately.
 - 🏷️ **Session name first** — notification subjects and bodies use the session name; the session id is written into the body as a session property.
@@ -98,7 +98,7 @@ dsh plugin --profile web remove dsh-email-notify
 
 ## 💬 Conversation completion notifications
 
-After SMTP is configured, a "Email Notify" checkbox appears on the left side of every conversation input:
+After SMTP is configured, an "Email Notify" switch appears on the left side of every conversation input:
 
 - Checking it affects only the **current session**.
 - That session sends one completion email after each finished turn (`turn/end`).
@@ -216,11 +216,11 @@ Task, conversation, approval and question notifications each have their own subj
 2. The first successful snapshot is a **baseline**: settled executions are recorded but not emailed.
 3. Later polls diff against the seen set and email newly settled executions through `nodemailer`.
 4. Seen execution IDs are persisted to `~/.dsh/email-notify/seen.json` — no duplicates after restart.
-5. The Host also listens to each session's `session/event`; on `turn/end` it emails the session when that session has the conversation-notify checkbox enabled.
+5. The Host also listens to each session's `session/event`; on `turn/end` it emails the session when that session has the conversation-notify switch enabled.
 6. The Host observes the `approval/request` waterfall (delegating with `next()`): when the approval reminder is on and the matching mode is selected, it emails the approval prompt.
 7. The Host observes the `user-questions/request` waterfall (delegating with `next()`): when the question reminder is on, it emails the questions and options.
 8. Session-related notifications resolve the live session name via `ctx.sessionTitle`; the session id is written into the body as a session property.
-9. The first-level settings page reads/writes config through the plugin's own loopback settings bridge and calls the test-mail endpoint; the input checkbox uses the `conversation-notify/describe` and `conversation-notify/set` endpoints; approval-mode availability uses `approval/availability`; diagnostics use `approval/status`.
+9. The first-level settings page reads/writes config through the plugin's own loopback settings bridge and calls the test-mail endpoint; the input switch uses the `conversation-notify/describe` and `conversation-notify/set` endpoints; approval-mode availability uses `approval/availability`; diagnostics use `approval/status`.
 
 ## 🔒 Security
 
@@ -258,12 +258,12 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) and [CHANGELOG.md](./CHANGELOG.md).
 - Check Host logs for lines starting with `[dsh-email-notify]`.
 - To re-send an execution, delete `~/.dsh/email-notify/seen.json` and restart the Host (a new baseline is built).
 
-**Conversation checkbox is on but no email after a turn?**
+**Conversation switch is on but no email after a turn?**
 
 - Make sure SMTP is fully configured and "Send test email" works.
-- The checkbox is per-session: enable it again in each conversation where you want notifications.
+- The switch is per-session: enable it again in each conversation where you want notifications.
 - Check Host logs for `[dsh-email-notify] conversation completion send failed` or `send failed`.
-- To clear all per-session checkbox state, delete `~/.dsh/email-notify/notify-sessions.json` and restart the Host.
+- To clear all per-session switch state, delete `~/.dsh/email-notify/notify-sessions.json` and restart the Host.
 
 **Approval reminder email not arriving?**
 

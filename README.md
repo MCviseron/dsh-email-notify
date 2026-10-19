@@ -16,7 +16,7 @@
 `dsh-email-notify` 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的邮件通知插件，支持以下触发方式：
 
 1. **官方自动化任务完成**：监听 schedule 注入的 `user/message`，在任务轮次结束（`turn/end`）后发送任务完成邮件。
-2. **对话完成通知**：在对话输入框左侧勾选「邮件通知」后，当前会话每完成一轮都会发送一封完成邮件。
+2. **对话完成通知**：在对话输入框左侧开启「邮件通知」开关后，当前会话每完成一轮都会发送一封完成邮件。
 3. **审批/提问提醒**：等待用户审批或回答 `ask_user_question` 时发送提醒邮件。
 
 ```text
@@ -28,11 +28,11 @@
 ## ✨ 特性
 
 - 🔔 **自动化任务完成通知**：官方定时/自动化任务结束后发送任务完成邮件。
-- 💬 **对话完成通知**：在对话输入框左侧勾选「邮件通知」，当前会话每完成一轮自动发信；勾选状态按会话持久化。
+- 💬 **对话完成通知**：在对话输入框左侧开启「邮件通知」开关，当前会话每完成一轮自动发信；开关状态按会话持久化。
 - ⏳ **审批邮件提醒**：设置中开启后，等待用户审批时发送提醒邮件；可分别选择「工作区审批提醒」与「Auto review 转手动审批提醒」，默认关闭。
 - ❓ **提问邮件提醒**：设置中开启后，Agent 使用 `ask_user_question` 等待用户回答时发送提醒邮件，正文包含问题与选项；默认关闭。
 - 🚫 **任务轮次去重**：自动化任务执行的那一轮不会再发会话完成邮件；任务结束后用户继续对话，会话通知恢复正常。
-- 💾 **勾选状态持久化**：对话勾选状态保存在 `~/.dsh/email-notify/notify-sessions.json`。
+- 💾 **开关状态持久化**：对话开关状态保存在 `~/.dsh/email-notify/notify-sessions.json`。
 - 🎛️ **一级设置页**：在 DSH 设置侧边栏直接显示「邮件通知」，无需进入「Web UI 插件」子级，全部配置在页内完成。
 - 📨 **一键测试邮件**：配置完成后点一下按钮即可验证 SMTP 是否可用。
 - 🏷️ **会话名称优先**：通知邮件主题与正文使用会话名称；会话 ID 作为会话属性放在正文中。
@@ -106,12 +106,12 @@ dsh plugin --profile web remove dsh-email-notify
 
 ## 💬 对话完成通知
 
-配置好 SMTP 后，在任意对话的**输入框左侧**会看到「邮件通知」勾选框：
+配置好 SMTP 后，在任意对话的**输入框左侧**会看到「邮件通知」开关：
 
-- 勾选后仅对**当前会话**生效；
+- 开启后仅对**当前会话**生效；
 - 该会话每完成一轮（`turn/end`）都会发送一封完成邮件；
-- 取消勾选后不再发送；
-- 勾选状态持久化在 `~/.dsh/email-notify/notify-sessions.json`，Host 重启后仍然保留。
+- 关闭开关后不再发送；
+- 开关状态持久化在 `~/.dsh/email-notify/notify-sessions.json`，Host 重启后仍然保留。
 
 > 对话完成邮件默认标题为 `[DSH 对话完成] {{sessionName}}`，默认正文为 `DSH 会话「{{sessionName}}」已于 {{time}} 完成一轮对话。`，并把 `{{sessionId}}` 作为「会话属性」写入正文；标题与正文都可以在设置中的「对话通知主题模板 / 对话通知正文模板」里修改。
 
@@ -228,11 +228,11 @@ dsh plugin --profile web remove dsh-email-notify
 1. Host 监听每个会话的 `session/event`。
 2. 收到 `user/message` 且 `source.kind === 'schedule'` 时，解析 `[SCHEDULE REMINDER]` / `[SCHEDULE REMINDER BATCH]`，记录该会话的待执行自动化任务。
 3. 下一次 `turn/start` 将该任务绑定到当前轮次；`turn/end` 时发送任务完成邮件，并跳过同一轮的对话完成邮件。
-4. 普通用户消息的 `turn/end` 仍按会话勾选状态发送对话完成邮件；任务结束后的后续对话不受影响。
+4. 普通用户消息的 `turn/end` 仍按会话开关状态发送对话完成邮件；任务结束后的后续对话不受影响。
 5. Host 监听 `approval/request` waterfall（只观察并 `next()` 放行）：审批提醒开启且对应模式选中时，发送包含审批提示内容的提醒邮件。
 6. Host 监听 `user-questions/request` waterfall（只观察并 `next()` 放行）：提问提醒开启时，发送包含问题与选项的提醒邮件。
 7. 所有会话相关通知优先解析 `ctx.sessionTitle` 里的会话名称；会话 ID 作为会话属性写入正文。
-8. Web 侧一级设置页通过插件自带的 loopback 设置桥读写配置，并调用「测试邮件」接口；输入框勾选通过 `conversation-notify/describe` / `conversation-notify/set` 接口读写；审批模式可用性通过 `approval/availability` 接口读取；诊断信息通过 `approval/status` 读取。
+8. Web 侧一级设置页通过插件自带的 loopback 设置桥读写配置，并调用「测试邮件」接口；输入框开关通过 `conversation-notify/describe` / `conversation-notify/set` 接口读写；审批模式可用性通过 `approval/availability` 接口读取；诊断信息通过 `approval/status` 读取。
 
 ```text
 自动化任务 user/message → 标记任务轮次 → turn/end → 任务完成邮件
@@ -256,7 +256,7 @@ dsh-email-notify/
 │   ├── mailer.ts                 # nodemailer 封装、收件人解析、配置校验
 │   ├── routes.ts                 # 测试邮件 / 设置桥接 HTTP API
 │   ├── loopback.ts               # loopback 请求校验
-│   └── client/                   # Web GUI 设置页 + 对话勾选（React）
+│   └── client/                   # Web GUI 设置页 + 对话开关（React）
 │       ├── index.ts              # 注册 settings.section 与 conversation.input.left
 │       ├── EmailNotifySettingsCard.tsx
 │       ├── ConversationNotifyCheckbox.tsx
@@ -297,15 +297,15 @@ pnpm check        # typecheck + build
 - 查看 Host 日志中是否有 `[dsh-email-notify] automation completion send failed`。
 - 诊断接口：`http://127.0.0.1:<port>/api/dsh-email-notify/approval/status`。
 
-**勾选了「邮件通知」但对话完成后没收到邮件？**
+**开启了「邮件通知」但对话完成后没收到邮件？**
 
 - 确认 SMTP 配置完整，且「发送测试邮件」可以成功收到。
-- 勾选状态是按会话记录的：换一个对话需要重新勾选。
+- 开关状态是按会话记录的：换一个对话需要重新开启。
 - 查看 Host 日志中是否有 `[dsh-email-notify] conversation completion send failed` 或 `send failed`。
 
 **审批邮件提醒没有收到？**
 
-- 确认「审批邮件提醒」已开启（默认关闭），且对应的「工作区审批提醒」/「Auto review 转手动审批提醒」模式已勾选。
+- 确认「审批邮件提醒」已开启（默认关闭），且对应的「工作区审批提醒」/「Auto review 转手动审批提醒」模式已开启。
 - 「Auto review 转手动审批提醒」只有在官方 auto review 插件已安装并启用时才可选。
 - 当前审批请求必须处于等待用户审批状态；审批提醒不会改变审批结果。
 - 查看 Host 日志中是否有 `[dsh-email-notify] approval notify failed`。
@@ -316,7 +316,7 @@ pnpm check        # typecheck + build
 - 只有 Agent 通过 `ask_user_question` 向你提问时才会触发；普通对话不会触发。
 - 提问提醒只观察、不回答，不会改变 Agent 的等待流程。
 - 查看 Host 日志中是否有 `[dsh-email-notify] ask notify failed`；也可以打开 `http://127.0.0.1:<port>/api/dsh-email-notify/approval/status` 查看 `askObserved` / `askSent` / `lastAsk`。
-- 若要清空所有会话的勾选状态，删除 `~/.dsh/email-notify/notify-sessions.json` 后重启 Host。
+- 若要清空所有会话的开关状态，删除 `~/.dsh/email-notify/notify-sessions.json` 后重启 Host。
 
 ## 📄 License
 

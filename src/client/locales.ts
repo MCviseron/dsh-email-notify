@@ -64,7 +64,7 @@ export const zh = {
   'settings.on': '开',
   'settings.off': '关',
   'conversation.notify': '邮件通知',
-  'conversation.notifyHint': '勾选后，当前会话每次完成一轮都会发送完成邮件通知',
+  'conversation.notifyHint': '开启后，当前会话每次完成一轮都会发送完成邮件通知',
 } as const
 
 export const en = {
@@ -133,7 +133,7 @@ export const en = {
   'settings.on': 'On',
   'settings.off': 'Off',
   'conversation.notify': 'Email Notify',
-  'conversation.notifyHint': 'When checked, send a completion email after every turn in this session',
+  'conversation.notifyHint': 'When enabled, send a completion email after every turn in this session',
 } as const
 
 export type EmailNotifyKey = keyof typeof zh

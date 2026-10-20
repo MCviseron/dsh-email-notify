@@ -11,6 +11,11 @@
 - 按任务/执行 ID 的静默/重试策略。
 - 审批提醒支持自定义变量扩展。
 
+## [0.4.4] - 2026-10-18
+
+### Changed
+
+- CI: 采用标准 npm 发布流程（`.github/workflows/publish.yml`，Node 24、tag 与 package.json 版本校验、OIDC trusted publishing + provenance），手动 `workflow_dispatch` 只做 dry-run。
 ## [0.4.3] - 2026-10-18
 
 ### Changed

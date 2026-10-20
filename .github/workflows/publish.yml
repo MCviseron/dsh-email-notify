@@ -1,6 +1,7 @@
 name: Publish
 
-# Publishes on a version tag (v*). Manual workflow_dispatch only runs a dry-run.
+# Publishes on a version tag (v*). Manual workflow_dispatch defaults to dry-run;
+# set the publish input to true to publish the current package.json version.
 # Requires npm Trusted Publisher configuration for:
 #   owner: MCviseron
 #   repository: dsh-email-notify
@@ -9,6 +10,12 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to npm (otherwise only dry-run)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -57,9 +64,9 @@ jobs:
           npm --version
 
       - name: Dry run
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != true
         run: npm pack --dry-run
 
       - name: Publish with provenance
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
         run: npm publish --access public --provenance

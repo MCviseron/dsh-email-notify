@@ -1,0 +1,65 @@
+name: Publish
+
+# Publishes on a version tag (v*). Manual workflow_dispatch only runs a dry-run.
+# Requires npm Trusted Publisher configuration for:
+#   owner: MCviseron
+#   repository: dsh-email-notify
+#   workflow: publish.yml
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            const tag = process.env.GITHUB_REF_NAME.replace(/^v/, '');
+            if (pkg.version !== tag) {
+              console.error('tag ' + tag + ' does not match package.json ' + pkg.version);
+              process.exit(1);
+            }
+            console.log('version ok:', pkg.version);
+          "
+
+      - name: Typecheck & build
+        run: pnpm check
+
+      - name: Upgrade npm
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Dry run
+        if: github.event_name == 'workflow_dispatch'
+        run: npm pack --dry-run
+
+      - name: Publish with provenance
+        if: startsWith(github.ref, 'refs/tags/')
+        run: npm publish --access public --provenance

@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 计划中
+
+- 支持 StartTLS 的显式开关（当前通过 `smtpSecure: false` + 587 端口使用 STARTTLS）。
+- 可选 HTML 正文模板（当前 HTML 由纯文本模板生成）。
+- 按任务/执行 ID 的静默/重试策略。
+- 审批提醒支持自定义变量扩展。
+
+## [0.4.3] - 2026-10-18
+
 ### Changed
 
 - 设置页所有布尔控件与对话输入框左侧「邮件通知」改为同一个官方 Settings Switch 组件（36×20、`aria-checked`、主题 token、禁用/焦点样式）。
@@ -14,13 +23,6 @@
 ### Fixed
 
 - 修复设置保存后必须重启 Host 才生效的问题：设置桥在 `mutate` 成功后立即用最新 resolved value 刷新 notifier 与系统提示。
-
-### 计划中
-
-- 支持 StartTLS 的显式开关（当前通过 `smtpSecure: false` + 587 端口使用 STARTTLS）。
-- 可选 HTML 正文模板（当前 HTML 由纯文本模板生成）。
-- 按任务/执行 ID 的静默/重试策略。
-- 审批提醒支持自定义变量扩展。
 
 ## [0.4.2] - 2026-10-17
 

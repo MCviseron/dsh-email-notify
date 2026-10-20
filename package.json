@@ -1,6 +1,6 @@
 {
   "name": "dsh-email-notify",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "DeepSeek Harness (DSH) plugin — send SMTP email (QQ Mail etc.) for task-board settlements, conversation completions, pending approvals, and pending ask-user questions; ships a first-level Web GUI settings page with per-notification templates, session-name subjects, a per-session input checkbox, and a test-mail button.",
   "license": "Apache-2.0",
   "author": {

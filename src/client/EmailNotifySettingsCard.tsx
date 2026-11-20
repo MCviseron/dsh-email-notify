@@ -4,6 +4,7 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import type { EmailNotifyKey } from './locales.ts'
 import type { SettingsScope } from './settings-scope.ts'
 import { Switch, switchCss } from './Switch.tsx'
+import { EmailNotifyDashboard } from './EmailNotifyDashboard.tsx'
 
 const API = {
   approvalAvailability: '/api/dsh-email-notify/approval/availability',
@@ -658,6 +659,7 @@ export function EmailNotifySettingsSection(props: EmailNotifySettingsSectionProp
           <p style={descriptionStyle}>{props.t('settings.description')}</p>
         </div>
       </div>
+      <EmailNotifyDashboard t={props.t} />
       <EmailNotifySettingsForm
         t={props.t}
         state={state}

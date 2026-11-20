@@ -14,9 +14,10 @@ import {
   type AskUserQuestionRequestLike,
   type EmailNotifyConfig,
 } from './index.ts'
-import { sendMail } from './mailer.ts'
+import { parseRecipients, sendMail, type MailMessage } from './mailer.ts'
 
 const TASK_BOARD_STATE_PATH = '/api/task-board/state'
+const MAX_STATS_EVENTS = 5000
 
 interface StateFile {
   version: 1
@@ -88,6 +89,69 @@ export interface AutomationPending {
   arrivedAt: number
   startedAt?: number
   bound: boolean
+}
+
+export type EmailSendKind = 'conversation' | 'automation' | 'approval' | 'ask' | 'test' | 'task'
+
+export interface EmailSendRecord {
+  id: string
+  at: number
+  kind: EmailSendKind
+  ok: boolean
+  durationMs: number
+  sender: string
+  recipients: string[]
+  sessionId: string
+  sessionName: string
+  subject: string
+  detail: string
+  error?: string
+}
+
+interface SendMeta {
+  sessionId?: string
+  sessionName?: string
+  detail?: string
+}
+
+interface StatsFile {
+  version: 1
+  events: EmailSendRecord[]
+}
+
+export interface DashboardStatsOptions {
+  days?: number
+  recent?: number
+}
+
+interface KindBucket {
+  kind: EmailSendKind
+  total: number
+  ok: number
+  fail: number
+}
+
+interface DayBucket {
+  date: string
+  total: number
+  ok: number
+  fail: number
+}
+
+interface SessionBucket {
+  id: string
+  name: string
+  total: number
+  ok: number
+  fail: number
+  lastAt: number
+  kinds: Partial<Record<EmailSendKind, number>>
+}
+
+interface AddressBucket {
+  address: string
+  total: number
+  fail: number
 }
 
 function stateKey(taskId: unknown, executionId: unknown): string {
@@ -397,6 +461,7 @@ export class EmailNotifier {
   private readonly askSeen = new WeakSet<object>()
   private readonly askKeys = new Set<string>()
   private readonly automationPending = new Map<string, AutomationPending[]>()
+  private readonly sendEvents: EmailSendRecord[] = []
   private askObserved = 0
   private askSent = 0
   private approvalObserved = 0
@@ -408,14 +473,17 @@ export class EmailNotifier {
   private readonly fetchImpl: typeof fetch
   private readonly statePath: string
   private readonly notifyStatePath: string
+  private readonly statsPath: string
 
   constructor(private readonly deps: NotifierDeps) {
     this.now = deps.now ?? Date.now
     this.fetchImpl = deps.fetchImpl ?? fetch
     this.statePath = deps.statePath ?? defaultStatePath()
     this.notifyStatePath = join(dirname(this.statePath), 'notify-sessions.json')
+    this.statsPath = join(dirname(this.statePath), 'stats.json')
     this.loadState()
     this.loadNotifyState()
+    this.loadStats()
   }
 
   applyConfig(config: EmailNotifyConfig): void {
@@ -446,7 +514,7 @@ export class EmailNotifier {
     const config = this.config
     const vars = this.testVars()
     const body = renderTemplate(config.bodyTemplate, vars)
-    await sendMail(config, {
+    await this.send('test', { sessionId: '__test__', sessionName: 'test', detail: 'test' }, {
       subject: renderTemplate(config.subjectTemplate, vars),
       text: body,
       html: textToHtml(body),
@@ -476,7 +544,7 @@ export class EmailNotifier {
       time: formatTime(this.now()),
     }
     const body = renderTemplate(this.config.conversationBodyTemplate ?? DEFAULT_CONVERSATION_BODY, vars)
-    await sendMail(this.config, {
+    await this.send('conversation', { sessionId, sessionName: name, detail: 'conversation' }, {
       subject: renderTemplate(this.config.conversationSubjectTemplate ?? DEFAULT_CONVERSATION_SUBJECT, vars),
       text: body,
       html: textToHtml(body),
@@ -560,7 +628,8 @@ export class EmailNotifier {
       taskCount: String(pending.reminders.length),
     }
     const body = renderTemplate(this.config.bodyTemplate, vars)
-    await sendMail(this.config, {
+    const name = sessionName === '' ? sessionId : sessionName
+    await this.send('automation', { sessionId, sessionName: name, detail: title }, {
       subject: renderTemplate(this.config.subjectTemplate, vars),
       text: body,
       html: textToHtml(body),
@@ -722,7 +791,7 @@ export class EmailNotifier {
     }
     const subject = renderTemplate(config.approvalSubjectTemplate ?? DEFAULT_APPROVAL_SUBJECT, vars)
     const body = cleanRenderedBody(renderTemplate(config.approvalBodyTemplate ?? DEFAULT_APPROVAL_BODY, vars))
-    await sendMail(config, {
+    await this.send('approval', { sessionId: input.sessionId, sessionName: input.sessionName, detail: input.toolName + ' / ' + modeText }, {
       subject,
       text: body,
       html: textToHtml(body),
@@ -807,7 +876,7 @@ export class EmailNotifier {
       }
       const subject = renderTemplate(config.askSubjectTemplate ?? DEFAULT_ASK_SUBJECT, vars)
       const body = renderTemplate(config.askBodyTemplate ?? DEFAULT_ASK_BODY, vars)
-      await sendMail(config, {
+      await this.send('ask', { sessionId: input.sessionId, sessionName: input.sessionName, detail: String(input.questions.length) + ' questions' }, {
         subject,
         text: body,
         html: textToHtml(body),
@@ -830,6 +899,184 @@ export class EmailNotifier {
       askSent: this.askSent,
       lastAsk: this.lastAsk ?? null,
     }
+  }
+
+  /** Aggregated send ledger for the settings dashboard. */
+  getDashboardStats(options?: DashboardStatsOptions): Record<string, unknown> {
+    const now = this.now()
+    const days = clampInt(options?.days ?? 14, 1, 365)
+    const recentLimit = clampInt(options?.recent ?? 12, 1, 100)
+    const events = [...this.sendEvents].sort((a, b) => b.at - a.at)
+    const todayStart = startOfLocalDay(now)
+    const last7Start = daysAgoStart(now, 6)
+    const last30Start = daysAgoStart(now, 29)
+    const total = events.length
+    const ok = events.reduce((sum, event) => sum + (event.ok ? 1 : 0), 0)
+    const fail = total - ok
+    const today = events.filter(event => event.at >= todayStart).length
+    const last7 = events.filter(event => event.at >= last7Start).length
+    const last30 = events.filter(event => event.at >= last30Start).length
+    const kindOrder: EmailSendKind[] = ['conversation', 'automation', 'approval', 'ask', 'test', 'task']
+    const kindMap = new Map<EmailSendKind, KindBucket>()
+    for (const kind of kindOrder) kindMap.set(kind, { kind, total: 0, ok: 0, fail: 0 })
+    const dayMap = new Map<string, DayBucket>()
+    for (let offset = days - 1; offset >= 0; offset -= 1) {
+      const day = new Date(todayStart)
+      day.setDate(day.getDate() - offset)
+      const key = localDayKey(day.getTime())
+      dayMap.set(key, { date: key, total: 0, ok: 0, fail: 0 })
+    }
+    const sessionMap = new Map<string, SessionBucket>()
+    const recipientMap = new Map<string, AddressBucket>()
+    const senderMap = new Map<string, AddressBucket>()
+    for (const event of events) {
+      const kind = kindMap.get(event.kind)
+      if (kind !== undefined) {
+        kind.total += 1
+        if (event.ok) kind.ok += 1
+        else kind.fail += 1
+      }
+      const day = dayMap.get(localDayKey(event.at))
+      if (day !== undefined) {
+        day.total += 1
+        if (event.ok) day.ok += 1
+        else day.fail += 1
+      }
+      const sessionKey = event.sessionId !== '' ? event.sessionId : 'name:' + event.sessionName
+      const session = sessionMap.get(sessionKey) ?? {
+        id: event.sessionId,
+        name: event.sessionName,
+        total: 0,
+        ok: 0,
+        fail: 0,
+        lastAt: 0,
+        kinds: {},
+      }
+      session.total += 1
+      session.lastAt = Math.max(session.lastAt, event.at)
+      if (event.ok) session.ok += 1
+      else session.fail += 1
+      session.kinds[event.kind] = (session.kinds[event.kind] ?? 0) + 1
+      sessionMap.set(sessionKey, session)
+      for (const address of event.recipients.length === 0 ? [''] : event.recipients) {
+        const key = address === '' ? '未配置收件人' : address
+        const bucket = recipientMap.get(key) ?? { address: key, total: 0, fail: 0 }
+        bucket.total += 1
+        if (!event.ok) bucket.fail += 1
+        recipientMap.set(key, bucket)
+      }
+      const senderKey = event.sender === '' ? '未配置发件账号' : event.sender
+      const sender = senderMap.get(senderKey) ?? { address: senderKey, total: 0, fail: 0 }
+      sender.total += 1
+      if (!event.ok) sender.fail += 1
+      senderMap.set(senderKey, sender)
+    }
+    return {
+      generatedAt: now,
+      retainedEvents: total,
+      cap: MAX_STATS_EVENTS,
+      days,
+      totals: {
+        total,
+        today,
+        last7,
+        last30,
+        ok,
+        fail,
+        successRate: total === 0 ? 0 : ok / total,
+        avgDurationMs: total === 0 ? 0 : Math.round(events.reduce((sum, event) => sum + event.durationMs, 0) / total),
+        lastAt: events[0]?.at ?? 0,
+      },
+      byKind: kindOrder.map(kind => kindMap.get(kind) ?? { kind, total: 0, ok: 0, fail: 0 }),
+      byDay: [...dayMap.values()],
+      bySession: [...sessionMap.values()].sort((a, b) => b.total - a.total || b.lastAt - a.lastAt).slice(0, 12),
+      byRecipient: [...recipientMap.values()].sort((a, b) => b.total - a.total).slice(0, 12),
+      bySender: [...senderMap.values()].sort((a, b) => b.total - a.total).slice(0, 8),
+      recent: events.slice(0, recentLimit),
+    }
+  }
+
+  private async send(kind: EmailSendKind, meta: SendMeta, message: MailMessage): Promise<void> {
+    const at = this.now()
+    const config = this.config
+    const recipients = parseRecipients(config.mailTo ?? '')
+    const sender = (config.smtpUser ?? '').trim() || (config.mailFrom ?? '').trim()
+    let ok = false
+    let error: string | undefined
+    try {
+      await sendMail(config, message)
+      ok = true
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause)
+      throw cause
+    } finally {
+      this.recordSend({
+        id: at.toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+        at,
+        kind,
+        ok,
+        durationMs: Math.max(0, this.now() - at),
+        sender,
+        recipients,
+        sessionId: meta.sessionId ?? '',
+        sessionName: meta.sessionName ?? '',
+        subject: message.subject,
+        detail: meta.detail ?? '',
+        ...(error === undefined ? {} : { error: error.slice(0, 300) }),
+      })
+    }
+  }
+
+  private loadStats(): void {
+    try {
+      if (!existsSync(this.statsPath)) return
+      const parsed = JSON.parse(readFileSync(this.statsPath, 'utf8')) as Partial<StatsFile>
+      if (parsed.version !== 1 || !Array.isArray(parsed.events)) return
+      for (const item of parsed.events) {
+        if (typeof item !== 'object' || item === null) continue
+        const event = item as Partial<EmailSendRecord>
+        if (typeof event.at !== 'number' || typeof event.kind !== 'string') continue
+        this.sendEvents.push({
+          id: typeof event.id === 'string' ? event.id : '',
+          at: event.at,
+          kind: event.kind as EmailSendKind,
+          ok: event.ok === true,
+          durationMs: typeof event.durationMs === 'number' ? event.durationMs : 0,
+          sender: typeof event.sender === 'string' ? event.sender : '',
+          recipients: Array.isArray(event.recipients)
+            ? event.recipients.filter((address): address is string => typeof address === 'string')
+            : [],
+          sessionId: typeof event.sessionId === 'string' ? event.sessionId : '',
+          sessionName: typeof event.sessionName === 'string' ? event.sessionName : '',
+          subject: typeof event.subject === 'string' ? event.subject : '',
+          detail: typeof event.detail === 'string' ? event.detail : '',
+          ...(typeof event.error === 'string' ? { error: event.error } : {}),
+        })
+      }
+      if (this.sendEvents.length > MAX_STATS_EVENTS) {
+        this.sendEvents.splice(0, this.sendEvents.length - MAX_STATS_EVENTS)
+      }
+    } catch (error) {
+      console.error('[dsh-email-notify] stats load failed:', error instanceof Error ? error.message : error)
+    }
+  }
+
+  private persistStats(): void {
+    try {
+      mkdirSync(dirname(this.statsPath), { recursive: true })
+      const state: StatsFile = { version: 1, events: this.sendEvents }
+      writeFileSync(this.statsPath, JSON.stringify(state), 'utf8')
+    } catch (error) {
+      console.error('[dsh-email-notify] stats persist failed:', error instanceof Error ? error.message : error)
+    }
+  }
+
+  private recordSend(event: EmailSendRecord): void {
+    this.sendEvents.push(event)
+    if (this.sendEvents.length > MAX_STATS_EVENTS) {
+      this.sendEvents.splice(0, this.sendEvents.length - MAX_STATS_EVENTS)
+    }
+    this.persistStats()
   }
 
   private testVars(): Record<string, string> {
@@ -923,7 +1170,7 @@ export class EmailNotifier {
       error: execution.error === undefined ? '' : String(execution.error),
     }
     try {
-      await sendMail(this.config, {
+      await this.send('task', { sessionName: '任务看板', detail: String(task.title ?? '') }, {
         subject: renderTemplate(this.config.subjectTemplate, vars),
         text: renderTemplate(this.config.bodyTemplate, vars),
         html: `<pre>${escapeHtml(renderTemplate(this.config.bodyTemplate, vars))}</pre>`,
@@ -987,6 +1234,30 @@ export class EmailNotifier {
       console.error('[dsh-email-notify] state persist failed:', error instanceof Error ? error.message : error)
     }
   }
+}
+
+function localDayKey(at: number): string {
+  const date = new Date(at)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return date.getFullYear() + '-' + month + '-' + day
+}
+
+function startOfLocalDay(at: number): number {
+  const date = new Date(at)
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
+}
+
+function daysAgoStart(at: number, days: number): number {
+  const date = new Date(startOfLocalDay(at))
+  date.setDate(date.getDate() - days)
+  return date.getTime()
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, Math.trunc(value)))
 }
 
 function defaultStatePath(): string {

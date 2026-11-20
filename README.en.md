@@ -33,6 +33,7 @@ conversation turn/end → Host checks notify-sessions.json → send completion e
 - ❓ **Question email reminder** — when enabled in settings, email while the agent is waiting for an `ask_user_question` answer, including the question and its options. Off by default.
 - 🧵 **Baseline, no history spam** — the first task-board poll only records existing executions; nothing is back-sent.
 - 💾 **Deduplicated & persisted** — notified execution IDs are stored in `~/.dsh/email-notify/seen.json`, so a Host restart never re-sends; per-session switch state lives in `~/.dsh/email-notify/notify-sessions.json`.
+- 📊 **Send dashboard** — totals for today / 7 days / 30 days, success rate, failures and average duration, broken down by notification type, session, recipient and sender account, plus a 14-day trend and recent sends.
 - 🎛️ **First-level settings page** — appears directly in the DSH settings sidebar as "Email Notify", not under Web UI plugins.
 - 📨 **One-click test email** — verify your SMTP settings immediately.
 - 🏷️ **Session name first** — notification subjects and bodies use the session name; the session id is written into the body as a session property.

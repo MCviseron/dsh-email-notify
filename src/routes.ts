@@ -34,6 +34,7 @@ export const EMAIL_NOTIFY_API = {
   conversationNotifySet: '/api/dsh-email-notify/conversation-notify/set',
   approvalAvailability: '/api/dsh-email-notify/approval/availability',
   approvalStatus: '/api/dsh-email-notify/approval/status',
+  dashboard: '/api/dsh-email-notify/dashboard',
 } as const
 
 const MAX_BODY_BYTES = 64 * 1024
@@ -123,6 +124,25 @@ export function makeEmailNotifyRoutes(notifier: EmailNotifier, isAutoReviewAvail
     },
   }
 
+  const dashboard: WebRoute = {
+    kind: 'exact',
+    path: EMAIL_NOTIFY_API.dashboard,
+    handler: async (req, res): Promise<void> => {
+      if (req.method !== 'GET' && req.method !== 'POST') return json(res, 405, { ok: false, error: 'method-not-allowed' })
+      if (!isLoopbackRequest(req)) return json(res, 403, { ok: false, error: 'forbidden' })
+      const url = new URL(req.url ?? '', 'http://127.0.0.1')
+      const days = Number.parseInt(url.searchParams.get('days') ?? '', 10)
+      const recent = Number.parseInt(url.searchParams.get('recent') ?? '', 10)
+      json(res, 200, {
+        ok: true,
+        ...notifier.getDashboardStats({
+          days: Number.isFinite(days) ? days : 14,
+          recent: Number.isFinite(recent) ? recent : 12,
+        }),
+      })
+    },
+  }
+
   const conversationNotifyDescribe: WebRoute = {
     kind: 'exact',
     path: EMAIL_NOTIFY_API.conversationNotifyDescribe,
@@ -154,7 +174,7 @@ export function makeEmailNotifyRoutes(notifier: EmailNotifier, isAutoReviewAvail
     },
   }
 
-  return [test, approvalAvailability, approvalStatus, conversationNotifyDescribe, conversationNotifySet]
+  return [test, approvalAvailability, approvalStatus, dashboard, conversationNotifyDescribe, conversationNotifySet]
 }
 
 export function makeEmailNotifySettingsRoutes(settings: SettingsBridge, onChanged?: (value: unknown) => void): WebRoute[] {

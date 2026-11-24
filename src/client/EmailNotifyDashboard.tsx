@@ -222,19 +222,22 @@ function SectionTitle(props: { children: ReactNode }) {
 
 function TrendChart(props: { data: DashboardData; t: EmailNotifyDashboardProps['t'] }) {
   const max = Math.max(1, ...props.data.byDay.map((day) => day.total))
+  // Label every second day, choosing parity from the end so the newest day
+  // always has a label and the two newest labels never sit side by side.
+  const labelParity = (props.data.byDay.length - 1) % 2
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 128, paddingTop: 6 }}>
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'stretch', gap: 6, height: 132, paddingTop: 6 }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 18, borderTop: '1px solid var(--dsw-alias-border-l2)' }} />
       {props.data.byDay.map((day, index) => {
-        const showLabel = props.data.byDay.length <= 10 || index % 2 === 0 || index === props.data.byDay.length - 1
+        const showLabel = props.data.byDay.length <= 16 || index % 2 === labelParity
         const title = day.date + ' · ' + props.t('dashboard.count') + ' ' + day.total + ' · ' + props.t('dashboard.ok') + ' ' + day.ok + ' · ' + props.t('dashboard.failed') + ' ' + day.fail
         return (
-          <div key={day.date} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }} title={title}>
+          <div key={day.date} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 5 }} title={title}>
             <div style={{ height: 100, width: '100%', display: 'flex', flexDirection: 'column-reverse', gap: 1 }}>
               {day.ok > 0 ? <div style={{ height: (day.ok / max) * 100 + '%', background: 'var(--dsw-alias-brand-primary)', borderRadius: '3px 3px 0 0' }} /> : null}
               {day.fail > 0 ? <div style={{ height: (day.fail / max) * 100 + '%', background: 'var(--dsw-alias-label-error)', borderRadius: '3px 3px 0 0' }} /> : null}
-              {day.total === 0 ? <div style={{ height: 2, background: 'var(--dsw-alias-border-l2)' }} /> : null}
             </div>
-            <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 9, lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+            <span style={{ height: 13, color: 'var(--dsw-alias-label-tertiary)', fontSize: 8, lineHeight: 1.2, whiteSpace: 'nowrap' }}>
               {showLabel ? fmtDay(day.date) : ''}
             </span>
           </div>
@@ -441,7 +444,19 @@ export function EmailNotifyDashboard(props: EmailNotifyDashboardProps) {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
             <div>
-              <SectionTitle>{props.t('dashboard.trend')}</SectionTitle>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <SectionTitle>{props.t('dashboard.trend')}</SectionTitle>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--dsw-alias-label-tertiary)', fontSize: 10 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <i style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 2, background: 'var(--dsw-alias-brand-primary)' }} />
+                    {props.t('dashboard.ok')}
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <i style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 2, background: 'var(--dsw-alias-label-error)' }} />
+                    {props.t('dashboard.failed')}
+                  </span>
+                </div>
+              </div>
               <TrendChart data={data} t={props.t} />
             </div>
             <div>
